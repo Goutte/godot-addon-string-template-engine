@@ -5,22 +5,27 @@
 class_name StringEngine
 extends RefCounted
 
-
+# TENTATIVE GRAMMAR
+# -----------------
 # LITERAL_STRING = /["]TODO["]/
 # LITERAL_NUMBER = LITERAL_INTEGER | LITERAL_FLOAT
 # LITERAL = LITERAL_NUMBER | LITERAL_STRING
 # VARIABLE_IDENTIFIER = /[a-zA-Z_][a-zA-Z0-9_]*/
 # EXPRESSION = VARIABLE_IDENTIFIER | LITERAL
-# ECHO = ECHO_OPEN EXPRESSION ECHO_CLOSE
+# ECHO = ECHO_OPENER EXPRESSION ECHO_CLOSER
 
 class Token:
 	extends Resource
 	enum Types {
-		UNKNOWN,
-		RAW_DATA,
-		ECHO_OPENER,  # {{
-		ECHO_CLOSER,  # }}
-		VARIABLE_IDENTIFIER,
+		UNKNOWN,               ## Usually means there was a failure somewhere.
+		RAW_DATA,              ## Most of the stuff in the source, all that is not our DSL.
+		WHITESPACES,           ## Tokenize whitespaces to be able to rebuild the source as it was.
+		ECHO_OPENER,           ## Usually {{
+		ECHO_CLOSER,           ## Usually }}
+		STATEMENT_OPENER,      ## Usually {%
+		STATEMENT_CLOSER,      ## Usually %}
+		STATEMENT_IDENTIFIER,  ## Examples: for, if, verbatim…
+		VARIABLE_IDENTIFIER,   ## The Token only knows the name of the variable, not its value.
 	}
 	
 	@export var type := Types.UNKNOWN
@@ -42,19 +47,23 @@ class Tokenizer:
 	enum States {
 		RAW_DATA,
 		ECHO_BODY,
+		STATEMENT_BODY,
 	}
 	
+	# Public configuration
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
 	var symbol_echo_opener := '{{'
 	var symbol_echo_closer := '}}'
-	#var symbol_open_statement := '{%'
-	#var symbol_close_statement := '%}'
+	var symbol_statement_opener := '{%'
+	var symbol_statement_closer := '%}'
+	#var symbol_escaper := '\\'  # not an option (we might not feature escaping at all)
 	
+	# Privates
 	var state: States
 	var tokens: Array[Token]
 	var source: String
-	# TODO: If possible do not use this variable, instead use a character cursor (int)
+	# TODO: If possible do not use this variable, instead use start/end cursors (ints)
 	var source_remaining: String
 	
 	# @protected
@@ -71,33 +80,61 @@ class Tokenizer:
 		self.source_remaining = template
 		
 		while not self.source_remaining.is_empty():
-			if States.RAW_DATA == self.state:
-				tokenize_raw_data()
-			elif States.ECHO_BODY == self.state:
-				consume_whitespaces()
-				tokenize_expression()
-				consume_whitespaces()
-				tokenize_echo_close()
-				set_state(States.RAW_DATA)
-			else:
-				breakpoint # unknown state (implement it!)
+			match self.state:
+				States.RAW_DATA:
+					tokenize_raw_data()
+				States.ECHO_BODY:
+					#consume_whitespaces()
+					tokenize_whitespaces()
+					tokenize_expression()
+					tokenize_whitespaces()
+					#consume_whitespaces()
+					tokenize_echo_closer()
+					set_state(States.RAW_DATA)
+				States.STATEMENT_BODY:
+					consume_whitespaces()
+					tokenize_statement_identifier()
+					consume_whitespaces()
+					# FIXME: ask the statement extension on how to tokenize here
+					consume_whitespaces()
+					tokenize_statement_closer()
+					set_state(States.RAW_DATA)
+				_:
+					breakpoint # unknown state (implement it!)
 		
 		return self.tokens
 	
+	func tokenize_whitespaces() -> void:
+		var regex_compiled: int
+		var whitespaces_regex := RegEx.new()
+		regex_compiled = whitespaces_regex.compile(
+			"^[\\s\\t]+"
+		)
+		if regex_compiled != OK:
+			breakpoint
+		
+		var whitespaces_match := whitespaces_regex.search(source_remaining)
+		if whitespaces_match == null:
+			return
+		
+		add_token(Token.Types.WHITESPACES, whitespaces_match.get_string())
+		consume_source(whitespaces_match.get_string().length())
+	
 	# @protected
 	func tokenize_raw_data() -> void:
-		# There is no way to categorize raw data by itself.
-		# We're going to advance to the first found OPEN of our grammar.
-		# With the default configuration, OPENs are `{{`, `{%` and `{#`.
+		# There is no way to discriminate raw data by itself.
+		# We're going to advance to the first found OPENER of our syntax.
+		# With the default configuration, OPENERs are `{{`, `{%` and `{#`.
 		# We need to account for backslashes prefixs, the escape sequences,
 		# and therefore consider as raw data the escaped openings such as `\{{`.
 		var compiled: int
 		var openers_regex := RegEx.new()
 		compiled = openers_regex.compile(
+			#"(?<![\\\\]([\\\\][\\\\])*)" +  # no lookbehind in Godot  T_T
 			"(?<symbol>" +
 			escape_for_regex(self.symbol_echo_opener) +
-			#"|" +
-			#escape_for_regex(symbol_open_statement) +
+			"|" +
+			escape_for_regex(self.symbol_statement_opener) +
 			")" +
 			"(?<clear_whitespace>" +
 			escape_for_regex(self.symbol_clear_whitespace) +
@@ -109,29 +146,67 @@ class Tokenizer:
 		if compiled != OK:
 			breakpoint
 		
-		var openers_match := openers_regex.search(source_remaining)
-		if openers_match == null:
-			add_token(Token.Types.RAW_DATA, source_remaining)
-			consume_source(source_remaining.length())
-		else:
-			var match_start := openers_match.get_start()
-			add_token(Token.Types.RAW_DATA, source_remaining.substr(0, match_start))
-			consume_source(match_start)
-			
-			var whole_match := openers_match.get_string()
-			var opener_symbol := openers_match.get_string(&'symbol')
-			var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')  # TODO
-			if opener_symbol == self.symbol_echo_opener:
-				set_state(States.ECHO_BODY)
-				add_token(Token.Types.ECHO_OPENER, whole_match)
+		# remove me
+		var escapers_regex := RegEx.new()
+		compiled = escapers_regex.compile(
+			"[\\\\](?<backslashes>(?:[\\\\][\\\\])*)$"
+		)
+		if compiled != OK:
+			breakpoint
+		
+		
+		var token_created := false
+		var search_starts_at := 0
+		
+		while not token_created:
+			var openers_match := openers_regex.search(source_remaining, search_starts_at)
+			if openers_match == null:
+				add_token(Token.Types.RAW_DATA, source_remaining)
+				consume_source(source_remaining.length())
+				token_created = true
 			else:
-				breakpoint  # unsupported opener symbol (implement it!)
-			consume_source(whole_match.length())
+				var match_start := openers_match.get_start()
+				var raw_data_contents := source_remaining.substr(0, match_start)
+				
+				# Idea: Consider escaped openers like \{{ as raw data, not openers.
+				# What about \\{{ ?  Or \\\\\\\\\{{ ?  Do we even escape backslashes ?  Urgh.
+				#var escapers_match := escapers_regex.search(raw_data_contents)
+				#if escapers_match != null:
+					#search_starts_at = openers_match.get_end()
+					#continue
+				
+				add_token(Token.Types.RAW_DATA, raw_data_contents)
+				consume_source(match_start)
+				token_created = true
+				
+				var whole_match := openers_match.get_string()
+				var opener_symbol := openers_match.get_string(&'symbol')
+				var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')  # TODO
+				
+				match opener_symbol:
+					symbol_echo_opener:
+						set_state(States.ECHO_BODY)
+						add_token(Token.Types.ECHO_OPENER, whole_match)
+					symbol_statement_opener:
+						set_state(States.STATEMENT_BODY)
+						add_token(Token.Types.STATEMENT_OPENER, whole_match)
+					_:
+						breakpoint  # implementation missing
+				
+				#if opener_symbol == self.symbol_echo_opener:
+					#set_state(States.ECHO_BODY)
+					#add_token(Token.Types.ECHO_OPENER, whole_match)
+				#else:
+					#breakpoint  # unsupported opener symbol (implement it!)
+				consume_source(whole_match.length())
 
-	func tokenize_echo_close() -> void:
-		tokenize_close(self.symbol_echo_closer, Token.Types.ECHO_CLOSER)
+	func tokenize_echo_closer() -> void:
+		tokenize_closer(self.symbol_echo_closer, Token.Types.ECHO_CLOSER)
+	
+	func tokenize_statement_closer() -> void:
+		tokenize_closer(self.symbol_statement_closer, Token.Types.STATEMENT_CLOSER)
 
-	func tokenize_close(symbol: String, token_type: Token.Types) -> void:
+	func tokenize_closer(symbol: String, token_type: Token.Types) -> void:
 		var compiled: int
 		var close_regex := RegEx.new()
 		compiled = close_regex.compile(
@@ -154,9 +229,30 @@ class Tokenizer:
 			consume_source(source_remaining.length())  # no infinite loops for you
 		else:
 			var whole_match := close_match.get_string()
-			var open_symbol := close_match.get_string(&'symbol')
+			var close_symbol := close_match.get_string(&'symbol')
 			var clear_whitespace_symbol := close_match.get_string(&'clear_whitespace')
 			add_token(token_type, whole_match)
+			consume_source(whole_match.length())
+	
+	var forbidden_identifier_chars := " #%<>{}()\\[\\]^'\"|.~+*-"  # MUST end with -
+	
+	func tokenize_statement_identifier() -> void:
+		var regex_compiled: int
+		var statement_identifier_regex := RegEx.new()
+		regex_compiled = statement_identifier_regex.compile(
+			"^" +
+			("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
+			#"[a-zA-Z_][a-zA-Z0-9_]*"  # safer, ascii-only
+		)
+		if regex_compiled != OK:
+			breakpoint
+		
+		var regex_match := statement_identifier_regex.search(source_remaining)
+		if regex_match == null:
+			assert(false, "Not a statement identifier")
+		else:
+			var whole_match := regex_match.get_string()
+			add_token(Token.Types.STATEMENT_IDENTIFIER, whole_match)
 			consume_source(whole_match.length())
 	
 	func tokenize_expression() -> void:
@@ -164,7 +260,8 @@ class Tokenizer:
 		var variable_identifier_regex := RegEx.new()
 		regex_compiled = variable_identifier_regex.compile(
 			"^" +
-			"[a-zA-Z_][a-zA-Z0-9_]*"
+			("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
+			#"[a-zA-Z_][a-zA-Z0-9_]*"  # safer, ascii-only
 		)
 		if regex_compiled != OK:
 			breakpoint
@@ -214,9 +311,17 @@ class Tokenizer:
 class SyntaxNode:
 	extends Resource
 	@export var children: Array[SyntaxNode] = []
+	@export var literal: String
+	@export var tokens: Array[Token] = []
+	
+	func with_tokens(tokens: Array[Token]) -> SyntaxNode:
+		self.tokens.append_array(tokens)
+		return self
+	func with_children(children: Array[SyntaxNode]) -> SyntaxNode:
+		self.children.append_array(children)
+		return self
 	
 	func evaluate(context: VisitorContext) -> String:
-		#breakpoint
 		return evaluate_self(context) + evaluate_children(context)
 	
 	func evaluate_self(context: VisitorContext) -> String:
@@ -273,6 +378,15 @@ class VariableIdentifierNode:
 		return str(context.variables.get(self.identifier, ''))
 
 
+class StatementIdentifierNode:
+	extends ExpressionNode
+	@export var identifier: String
+	
+	func with_identifier(value: String) -> StatementIdentifierNode:
+		self.identifier = value
+		return self
+
+
 class EchoNode:
 	extends SyntaxNode
 	# Perhaps just use children with only one child allowed instead of this ?
@@ -286,9 +400,79 @@ class EchoNode:
 		return self.expression.evaluate(context)
 
 
+class StatementNode:
+	extends SyntaxNode
+	@export var identifier: String
+
+
+class StatementExtension:
+	extends Resource
+
+	func get_statement_identifier() -> String:
+		breakpoint  # override me !
+		return ''
+	
+	func matches_statement_identifier(id_to_match: String) -> bool:
+		return id_to_match == get_statement_identifier()
+
+
+class VerbatimStatementExtension:
+	extends StatementExtension
+	
+	func get_statement_identifier() -> String:
+		return 'verbatim'
+	
+	func parse(
+		identifier_token: Token,
+		arguments_tokens: Array[Token],
+		parser: Parser,
+		context: ParserContext,
+	) -> StatementNode:
+		var content_tokens := context.consume_until(
+			func(token_index: int):
+				return (
+					context.tokens[token_index].type == Token.Types.STATEMENT_OPENER
+					&&
+					context.tokens[token_index+1].type == Token.Types.STATEMENT_IDENTIFIER
+					&&
+					context.tokens[token_index+1].literal == 'end' + get_statement_identifier()
+					&&
+					context.tokens[token_index+2].type == Token.Types.STATEMENT_CLOSER
+				)
+		)
+		context.consume_current_token()  # {%
+		context.consume_current_token()  # end<statement_identifier>
+		context.consume_current_token()  # %}
+		
+		var content := content_tokens.reduce(
+			func(acc: String, tk: Token):
+				return acc + tk.literal
+				,
+			""
+		)
+		var content_node := RawDataNode.new().with_data(content)
+		return StatementNode.new().with_children([content_node])
+	
+	func evaluate(node: StatementNode, context: VisitorContext) -> String:
+		if self.children.is_empty():
+			return ""
+		assert(self.children.size() == 1, "Why would there be more ?")
+		return self.children[0].evaluate(context)
+
+
+#class VerbatimStatementNode:
+	#extends StatementNode
+	#func evaluate(context: VisitorContext) -> String:
+		#if self.children.is_empty():
+			#return ""
+		#assert(self.children.size() == 1, "Why would there be more ?")
+		#return self.children[0].evaluate(context)
+
+
+
 class ParserContext:
 	extends Resource
-	
+	var statement_extensions: Array[StatementExtension]
 	var tokens: Array[Token]
 	var current_token_index := 0
 	
@@ -296,10 +480,27 @@ class ParserContext:
 		self.tokens = value
 		return self
 	
-	func has_tokens_remaining() -> bool:
+	func with_statement_extensions(value: Array[StatementExtension]) -> ParserContext:
+		self.statement_extensions = value
+		return self
+	
+	func get_statement_extension(identifier: String) -> StatementExtension:
+		var i := self.statement_extensions.find_custom(
+			func(se: StatementExtension):
+				return se.get_statement_identifier() == identifier
+		)
+		#if i == -1:
+			#i = self.statement_extensions.find_custom(
+				#func(se: StatementExtension):
+					#return 'end' + se.get_statement_identifier() == identifier
+			#)
+		assert(i >= 0, "No statement extension found with identifier %s" % identifier)
+		return self.statement_extensions[i]
+	
+	func has_tokens_remaining(at_least := 1) -> bool:
 		return (
-			self.current_token_index
-			<
+			self.current_token_index + at_least
+			<=
 			self.tokens.size()
 		)
 	
@@ -313,6 +514,10 @@ class ParserContext:
 	func consume_token() -> void:
 		self.current_token_index += 1
 	
+	func consume_some_tokens(amount: int) -> void:
+		assert(amount >= 0)
+		self.current_token_index += amount
+	
 	func consume_until_type(type: Token.Types) -> Array[Token]:
 		var consumed: Array[Token] = []
 		while has_tokens_remaining():
@@ -322,12 +527,32 @@ class ParserContext:
 			consumed.append(token)
 		return consumed
 	
+	func consume_until(condition: Callable) -> Array[Token]:
+		var consumed: Array[Token] = []
+		var found := false
+		var cursor := -1
+		while not found:
+			cursor += 1
+			if self.current_token_index + cursor >= self.tokens.size():
+				assert(false, "Did not find the end condition.")
+				break
+			found = condition.call(self.current_token_index + cursor)
+		consumed.append_array(self.tokens.slice(self.current_token_index, self.current_token_index + cursor))
+		consume_some_tokens(cursor)
+		return consumed
 
 
 class Parser:
 	extends RefCounted
 	
-	func parse(tokens: Array[Token]) -> SyntaxTree:
+	static var DEFAULT_STATEMENT_EXTENSIONS: Array[StatementExtension] = [
+		VerbatimStatementExtension.new(),
+	]
+	
+	func parse(
+		tokens: Array[Token],
+		statement_extensions: Array[StatementExtension] = DEFAULT_STATEMENT_EXTENSIONS,
+	) -> SyntaxTree:
 		var tokens_amount := tokens.size()
 		var body := BodyNode.new()
 		var tree := SyntaxTree.new().with_body(body)
@@ -335,28 +560,44 @@ class Parser:
 			ParserContext
 			.new()
 			.with_tokens(tokens)
+			.with_statement_extensions(statement_extensions)
 		)
 		
 		while context.has_tokens_remaining():
 			var token: Token = context.consume_current_token()
-			
-			#var node: SyntaxNode = token.parse(context)
 			var node: SyntaxNode = parse_token(token, context)
 			body.children.append(node)
-		
 		
 		return tree
 
 	func parse_token(token: Token, context: ParserContext) -> SyntaxNode:
 		match token.type:
 			Token.Types.RAW_DATA:
-				return RawDataNode.new().with_data(token.literal)
+				return RawDataNode.new().with_data(token.literal).with_tokens([token])
 			Token.Types.ECHO_OPENER:
 				var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
 				var expression: ExpressionNode = parse_expression(tokens_subset, context)
-				return EchoNode.new().with_expression(expression)
+				var echo_tokens: Array[Token] = []
+				echo_tokens.append(token)
+				echo_tokens.append_array(tokens_subset)
+				echo_tokens.append(context.get_current_token(-1))
+				return EchoNode.new().with_expression(expression).with_tokens(
+					echo_tokens
+					#([token] + tokens_subset + [context.get_current_token(-1)]) as Array[Token]
+				)
+			
+			Token.Types.STATEMENT_OPENER:
+				var tokens_subset := context.consume_until_type(Token.Types.STATEMENT_CLOSER)
+				var identifier_token := tokens_subset.pop_front()
+				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
+				var statement_extension := context.get_statement_extension(identifier_token.literal)
+				return statement_extension.parse(identifier_token, tokens_subset, self, context)
+				#return StatementNode.new()
+				
 			Token.Types.VARIABLE_IDENTIFIER:
-				return VariableIdentifierNode.new().with_identifier(token.literal)
+				return VariableIdentifierNode.new().with_identifier(token.literal).with_tokens([token])
+			Token.Types.STATEMENT_IDENTIFIER:
+				return StatementIdentifierNode.new().with_identifier(token.literal).with_tokens([token])
 			_:
 				breakpoint  # implement your new token type !
 		
@@ -364,6 +605,8 @@ class Parser:
 		return RawDataNode.new().with_data("")
 
 	func parse_expression(tokens_subset: Array[Token], context: ParserContext) -> ExpressionNode:
+		tokens_subset = tokens_subset.filter(func(t: Token): return t.type != Token.Types.WHITESPACES)
+		
 		assert(tokens_subset.size() > 0, "Expected an expression, got …")
 		assert(tokens_subset.size() == 1)
 		
@@ -375,6 +618,7 @@ class Parser:
 				breakpoint
 		
 		return ExpressionNode.new()
+
 
 class VisitorContext:
 	extends Resource
