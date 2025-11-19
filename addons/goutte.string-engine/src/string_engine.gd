@@ -47,6 +47,7 @@ class Token:
 	func with_type(value: Types) -> Token:
 		self.type = value
 		return self
+	
 	func with_literal(value: String) -> Token:
 		self.literal = value
 		return self
@@ -84,7 +85,7 @@ class StringView:
 		return regex.search(self.string, self.start, self.start + self.len)
 	
 	func search_with_regex_using_anchors(regex: RegEx) -> RegExMatch:
-		# Much slower, but works.
+		# Slower, but it just works.
 		return regex.search(self.get_as_string())
 	
 	func length() -> int:
@@ -102,7 +103,7 @@ class StringView:
 		return get_as_string()
 
 
-## Probably closer to a Lexer now as its states are tied to our grammar.
+## Probably closer to a Lexer now, as its states are kinda tied to our grammar.
 class Tokenizer:
 	extends RefCounted
 	enum States {
@@ -122,33 +123,22 @@ class Tokenizer:
 	# Privates
 	var state: States
 	var tokens: Array[Token]  # TODO: make a TokenStream class
-	var source: String     # Immutable whole source, we work on a view of it (StringView class?)
-	#var source_start: int  # Start index of our view on the source, inclusive
-	#var source_end: int    # End index of our view on the source, exclusive
-	var source_view: StringView
-	# TODO: If possible do not use this variable, instead use start/end cursors (ints)
-	#var source_remaining: String
+	var source: String  # Immutable whole source, we work on a view of it
+	var source_view: StringView  # Our view on the source template.
 	
 	# @protected
 	func reset():
 		state = States.RAW_DATA
 		tokens = []  # do NOT clear() ; copy is needed ← output of tokenize() !
 		source = ""
-		#source_start = 0
-		#source_end = 0
 		source_view = null
-		#source_remaining = ""
 	
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
 		reset()
 		self.source = template
-		#self.source_start = 0
-		#self.source_end = self.source.length()
 		self.source_view = StringView.new(template, 0, template.length())
-		#self.source_remaining = template
 		
-		#while not self.source_remaining.is_empty():
 		while self.source_view.length() > 0:
 			match self.state:
 				States.RAW_DATA:
@@ -181,7 +171,6 @@ class Tokenizer:
 		var compiled: int
 		var openers_regex := RegEx.new()
 		compiled = openers_regex.compile(
-			#"(?<![\\\\]([\\\\][\\\\])*)" +  # no lookbehind in Godot  T_T
 			"(?<symbol>" +
 			escape_for_regex(self.symbol_echo_opener) +
 			"|" +
@@ -197,16 +186,8 @@ class Tokenizer:
 		if compiled != OK:
 			breakpoint
 		
-		#var openers_match := openers_regex.search(source_remaining, search_starts_at)
-		prints("Searching for openers", self.source_view.start, self.source_view.len)
 		var openers_match := self.source_view.search_with_regex_using_anchors(openers_regex)
-		#var openers_match := self.source_view.search_with_regex(openers_regex)
 		
-		#var openers_match := openers_regex.search(
-			#self.source,
-			#self.source_start,
-			#self.source_end,
-		#)
 		var source_remaining := source_view.get_as_string()
 		if openers_match == null:
 			add_token(Token.Types.RAW_DATA, source_remaining)
@@ -258,7 +239,6 @@ class Tokenizer:
 			breakpoint
 		
 		var close_match := self.source_view.search_with_regex(close_regex)
-		#var close_match := close_regex.search(source_remaining)
 		if close_match == null:
 			assert(false, "Expected close token, got (TODO) instead")
 			consume_source(source_view.length())  # no infinite loops for you
@@ -282,7 +262,6 @@ class Tokenizer:
 		if regex_compiled != OK:
 			breakpoint
 		
-		#var regex_match := statement_identifier_regex.search(source_remaining)
 		var regex_match := self.source_view.search_with_regex_using_anchors(statement_identifier_regex)
 		if regex_match == null:
 			assert(false, "Not a statement identifier")
@@ -308,7 +287,6 @@ class Tokenizer:
 			breakpoint
 			return ERR_PRINTER_ON_FIRE
 		
-		#var regex_match := variable_identifier_regex.search(source_remaining)
 		var regex_match := self.source_view.search_with_regex_using_anchors(variable_identifier_regex)
 		if regex_match == null:
 			#assert(false, "Not a variable identifier")
@@ -331,12 +309,6 @@ class Tokenizer:
 		self.tokens[-1].whitespaces_after = consumed_whitespaces
 		
 	func consume_whitespaces() -> String:
-		#var whitespaces_consumed := ""
-		#var source_afterwards = self.source_remaining.lstrip(" \t")
-		#var amount := self.source_view.length() - source_afterwards.length()
-		#whitespaces_consumed += self.source_remaining.substr(0, amount)
-		#self.source_remaining = source_afterwards
-		
 		var regex_compiled: int
 		var whitespaces_regex := RegEx.new()
 		regex_compiled = whitespaces_regex.compile(
@@ -348,7 +320,6 @@ class Tokenizer:
 		
 		var whitespaces_match := self.source_view.search_with_regex_using_anchors(whitespaces_regex)
 		if whitespaces_match != null:
-			prints("Tokenizer", "Consuming %d whitespaces" % whitespaces_match.get_string().length())
 			consume_source(whitespaces_match.get_string().length())
 			return whitespaces_match.get_string()
 		
@@ -357,39 +328,38 @@ class Tokenizer:
 		return ""
 	
 	func consume_source(amount: int) -> void:
-		assert(amount >= 0)
+		assert(amount >= 0, "Cannot consume a source negatively. … For now.  We can do it.")
 		if amount < 0:
 			return
-		
 		if amount == 0:  # just to see if/when that happens, remove me at will
 			breakpoint
 			return
 		
-		#self.source_remaining = self.source_remaining.substr(amount)
-		prints('consuming source view:', source_view)
-		prints('amount', amount)
 		self.source_view.shrink_from_start_by(amount)
-		prints('source view after    :', source_view)
 	
 	# No RegEx.escape() support yet, see https://github.com/godotengine/godot-proposals/issues/7995
 	func escape_for_regex(input: String) -> String:
-		input = input.replace("\\", "\\\\")
-		input = input.replace(".", "\\.")
-		input = input.replace("^", "\\^")
-		input = input.replace("$", "\\$")
-		input = input.replace("*", "\\*")
-		input = input.replace("+", "\\+")
-		input = input.replace("?", "\\?")
-		input = input.replace("(", "\\(")
-		input = input.replace(")", "\\)")
-		input = input.replace("[", "\\[")
-		input = input.replace("]", "\\]")
-		input = input.replace("{", "\\{")
-		input = input.replace("}", "\\}")
-		input = input.replace("|", "\\|")
-		return input
+		return (
+			input
+			.replace("\\", "\\\\")
+			.replace(".", "\\.")
+			.replace("^", "\\^")
+			.replace("$", "\\$")
+			.replace("*", "\\*")
+			.replace("+", "\\+")
+			.replace("?", "\\?")
+			.replace("(", "\\(")
+			.replace(")", "\\)")
+			.replace("[", "\\[")
+			.replace("]", "\\]")
+			.replace("{", "\\{")
+			.replace("}", "\\}")
+			.replace("|", "\\|")
+			# : < > are missing, no ?
+		)
 
 
+## Main element of our (Abstract) Syntax Tree.
 class SyntaxNode:
 	extends Resource
 	@export var children: Array[SyntaxNode] = []
@@ -399,29 +369,40 @@ class SyntaxNode:
 	func with_tokens(tokens: Array[Token]) -> SyntaxNode:
 		self.tokens.append_array(tokens)
 		return self
+	
 	func with_children(children: Array[SyntaxNode]) -> SyntaxNode:
 		self.children.append_array(children)
 		return self
 	
-	func evaluate(context: VisitorContext) -> String:
-		return evaluate_self(context) + evaluate_children(context)
-	
-	func evaluate_self(context: VisitorContext) -> String:
+	func evaluate(context: VisitorContext) -> Variant:
 		return ""
 	
-	func evaluate_children(context: VisitorContext) -> String:
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context) + serialize_children(context)
+	
+	func serialize_self(context: VisitorContext) -> String:
+		return str(evaluate(context))
+	
+	func serialize_children(context: VisitorContext) -> String:
+		#return self.children.reduce(
+			#func(accu: String, child: SyntaxNode): return accu + child.serialize(context),
+			#"",
+		#)
+		# -^- which is faster ? (the bottom one is easier to read) -v-
 		var output := ""
 		for child: SyntaxNode in self.children:
-			output += child.evaluate(context)
+			output += child.serialize(context)
 		return output
 
 
+## Our Syntax Tree Root Node.
+## There's room for other nodes than the body ; it'll make sense later.
 class SyntaxTree:
 	extends SyntaxNode
 	@export var body: BodyNode
 	
-	func evaluate(context: VisitorContext) -> String:
-		return self.body.evaluate(context)
+	func serialize(context: VisitorContext) -> String:
+		return self.body.serialize(context)
 	
 	func with_body(value: BodyNode) -> SyntaxTree:
 		self.body = value
@@ -440,7 +421,7 @@ class RawDataNode:
 		self.data = value
 		return self
 	
-	func evaluate_self(context: VisitorContext) -> String:
+	func serialize_self(context: VisitorContext) -> String:
 		return data
 
 
@@ -456,8 +437,37 @@ class VariableIdentifierNode:
 		self.identifier = value
 		return self
 
-	func evaluate(context: VisitorContext) -> String:
+	func serialize(context: VisitorContext) -> String:
 		return str(context.variables.get(self.identifier, ''))
+
+
+class IntegerLiteralNode:
+	extends ExpressionNode
+	@export var value: int
+	
+	func with_value(value: int) -> IntegerLiteralNode:
+		self.value = value
+		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		return self.value
+
+
+class BinaryOperatorNode:
+	extends ExpressionNode
+	@export var operand_left: ExpressionNode
+	@export var operand_right: ExpressionNode
+
+
+class AdditionOperatorNode:
+	extends BinaryOperatorNode
+	
+	func evaluate(context: VisitorContext) -> Variant:
+		return (
+			self.operand_left.evaluate(context)
+			+
+			self.operand_right.evaluate(context)
+		)
 
 
 class StatementIdentifierNode:
@@ -478,8 +488,8 @@ class EchoNode:
 		self.expression = value
 		return self
 
-	func evaluate(context: VisitorContext) -> String:
-		return self.expression.evaluate(context)
+	func serialize(context: VisitorContext) -> String:
+		return self.expression.serialize(context)
 
 
 class StatementNode:
@@ -535,20 +545,20 @@ class VerbatimStatementExtension:
 		var content_node := RawDataNode.new().with_data(content)
 		return StatementNode.new().with_children([content_node])
 	
-	func evaluate(node: StatementNode, context: VisitorContext) -> String:
+	func serialize(node: StatementNode, context: VisitorContext) -> String:
 		if self.children.is_empty():
 			return ""
 		assert(self.children.size() == 1, "Why would there be more ?")
-		return self.children[0].evaluate(context)
+		return self.children[0].serialize(context)
 
 
 #class VerbatimStatementNode:
 	#extends StatementNode
-	#func evaluate(context: VisitorContext) -> String:
+	#func serialize(context: VisitorContext) -> String:
 		#if self.children.is_empty():
 			#return ""
 		#assert(self.children.size() == 1, "Why would there be more ?")
-		#return self.children[0].evaluate(context)
+		#return self.children[0].serialize(context)
 
 
 
@@ -696,7 +706,7 @@ class VisitorContext:
 	var variables := {}
 
 
-## Outputs the evaluated template with variables replaced and logic applied.
+## Outputs the serialized template with variables replaced and logic applied.
 class EvaluatorVisitor:
 	extends RefCounted
 	
@@ -711,7 +721,7 @@ class EvaluatorVisitor:
 		return self.output
 	
 	func visit_node(node: SyntaxNode, context: VisitorContext) -> void:
-		self.output += node.evaluate(context)
+		self.output += node.serialize(context)
 
 #class CompilerVisitor:  # TODO: cache the template as pure GdScript
 #class HighlighterVisitor:  # TODO: syntax highlighting for Godot's code editor
@@ -719,12 +729,8 @@ class EvaluatorVisitor:
 ## The main method of the string template engine.
 func render(source: String, variables: Dictionary) -> String:
 	
-	prints("Template", source)
-	
 	var tokenizer := Tokenizer.new()
 	var tokens := tokenizer.tokenize(source)
-	
-	prints("Tokens", tokens)
 	
 	var parser := Parser.new()
 	var syntax_tree := parser.parse(tokens, self.statement_extensions)
