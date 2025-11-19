@@ -3,36 +3,35 @@ extends AbstractTest
 func test_a_bunch_of_use_cases() -> void:
 	var data := [
 		{
-			&'test': "Empty string",
+			&'rule': "Empty template yields empty string",
 			&'template': "",
 			&'variables': {},
 			&'expected': "",
 		},
 		{
-			&'test': "Static string",
+			&'rule': "Template without statements yields itself",
 			&'template': "Bonjour !",
 			&'variables': {},
 			&'expected': "Bonjour !",
 		},
 		{
-			&'test': "Ignore unused variables",
+			&'rule': "Ignore unused variables",
 			&'template': "Bonjour !",
 			&'variables': {
-				&'name': 'Goutte',
+				&'i_am_not_used': '.oOwOo.',
 			},
 			&'expected': "Bonjour !",
 		},
 		{
-			&'test': "Echo a variable",
+			&'rule': "Echo a variable",
 			&'template': "Hello {{ name }}!",
-			#&'template': "Hello {{ name | uppercase | reverse }}!",
 			&'variables': {
 				&'name': 'Godette',
 			},
 			&'expected': "Hello Godette!",
 		},
 		{
-			&'test': "Echo a variable (allow no spaces)",
+			&'rule': "Echo a variable (whitespaces are optional)",
 			&'template': "Hello {{name}}!",
 			&'variables': {
 				&'name': 'Goutte',
@@ -40,7 +39,7 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Hello Goutte!",
 		},
 		{
-			&'test': "Echo a variable (ignore spaces)",
+			&'rule': "Echo a variable (whitespaces are conflatable)",
 			&'template': "Hello {{   name     }}!",
 			&'variables': {
 				&'name': 'there',
@@ -48,7 +47,7 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Hello there!",
 		},
 		{
-			&'test': "Echo two variables",
+			&'rule': "Echo two variables",
 			&'template': "Hello {{ surname }} {{ name }}!",
 			&'variables': {
 				&'surname': "Godot's",
@@ -57,7 +56,7 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Hello Godot's Community!",
 		},
 		{
-			&'test': "Accept multiline templates",
+			&'rule': "Accept multiline templates",
 			&'template': """
 			Hello {{ name }},
 			I hope this email finds you well.
@@ -76,7 +75,8 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
-			&'test': "Allow unicode runes (unsafely)",
+			# FIXME: We need an allowlist for this, not the garbage we have right now.
+			&'rule': "Allow unicode runes (unsafely)",
 			&'template': """
 			🥳 with 🦊 like {{ 🦋 }}
 			""",
@@ -87,23 +87,22 @@ func test_a_bunch_of_use_cases() -> void:
 			🥳 with 🦊 like 🦺
 			""",
 		},
-		# Nope: was my first instinct, but {% verbatim %} is less annoying
-		#{
-			#&'test': "Escape echo statement shorthand delimiters",
-			#&'template': """
-			#Use an echo statement like so: `Hello \\{{ name \\}}`
-			#With the key `'name'` set to `"world"` in the `variables` Dictionary.
-			#""",
-			#&'variables': {
-				#&'name': "Escaper",
-			#},
-			#&'expected': """
-			#Use an echo statement like so: `Hello {{ name }}`
-			#With the key `'name'` set to `"world"` in the `variables` Dictionary.
-			#""",
-		#},
 		{
-			&'test': "Verbatim statement",
+			# NOTE: Use {% verbatim %} … {% endverbatim %} instead of escape sequances
+			&'rule': "Backslashes do NOT escape instructions",
+			&'template': """
+			C:\\{{ folder }}\\{{ filename }}
+			""",
+			&'variables': {
+				&'folder': "system32",
+				&'filename': "ms32.exe",
+			},
+			&'expected': """
+			C:\\system32\\ms32.exe
+			""",
+		},
+		{
+			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
 			Use an echo statement like so: `Hello {{ name }}`
@@ -120,12 +119,61 @@ func test_a_bunch_of_use_cases() -> void:
 			
 			""",
 		},
-		
-		
+		{
+			&'rule': "Verbatim statement (preserves conflatable whitespaces)",
+			&'template': """
+			{% verbatim %}Use an echo statement like so: `Hello {{  name  }}`.{% endverbatim %}
+			""",
+			&'variables': {
+				&'name': "Escaper",
+			},
+			&'expected': """
+			Use an echo statement like so: `Hello {{  name  }}`.
+			""",
+		},
+		# I don't know what to do with this one for now…
+		#{
+			#&'rule': "Verbatim statement (recursion)",
+			#&'template': """
+			#{% verbatim %}
+			#{% verbatim %}
+			#Hello {{  name  }}
+			#{% endverbatim %}
+			#{% endverbatim %}
+			#""",
+			#&'variables': {
+				#&'name': "verboten",
+			#},
+			#&'expected': """
+			#
+			#{% verbatim %}
+			#Hello {{  name  }}
+			#{% endverbatim %}
+			#
+			#""",
+		#},
+		#{
+			#&'rule': "Addition of integers",
+			#&'template': """
+			#Current: {{ current }}
+			#Next: {{ current + 1 }}
+			#""",
+			#&'variables': {
+				#&'current': 41,
+			#},
+			#&'expected': """
+			#Current: 41
+			#Next: 42
+			#""",
+		#},
 	]
-	var engine: StringEngine = StringEngine.new()
+	var engine := StringEngine.new()
 	for datum: Dictionary in data:
 		var expected: String = datum[&'expected']
 		var actual: String = engine.render(datum[&'template'], datum[&'variables'])
-		print("\t* %s" % [datum[&'test']])
-		assert_equals(expected, actual, datum['test'])
+		print("\t* %s" % [datum[&'rule']])
+		assert_equals(expected, actual, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
+			datum[&'rule'],
+			datum[&'template'],
+			datum[&'variables'],
+		])
