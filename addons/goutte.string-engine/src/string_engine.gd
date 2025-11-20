@@ -1,5 +1,6 @@
 # Vanilla GDScript "port" of Inja, Twig, Jinja…
 # If you need perfs, try the Ginja addon using a gdextension to wrap Inja.
+# Used to generate shaders, dynamic dialogues, HTML pages…
 
 ## A String Template Engine, super slow but flexible.
 class_name StringEngine
@@ -11,9 +12,18 @@ extends RefCounted
 # LITERAL_NUMBER = LITERAL_INTEGER | LITERAL_FLOAT
 # LITERAL = LITERAL_NUMBER | LITERAL_STRING
 # VARIABLE_IDENTIFIER = /[a-zA-Z_][a-zA-Z0-9_]*/
-# EXPRESSION = VARIABLE_IDENTIFIER | LITERAL
 # ECHO = ECHO_OPENER EXPRESSION ECHO_CLOSER
-
+# EXPRESSION = VARIABLE_IDENTIFIER
+#            | LITERAL
+#            | PREFIX_OPERATOR EXPRESSION
+#            | EXPRESSION INFIX_OPERATOR EXPRESSION
+#            | EXPRESSION FILTER_SYMBOL FILTER
+#            | "(" EXPRESSION ")"
+# EXPRESSIONS = EXPRESSION
+#             | EXPRESSION "," EXPRESSIONS
+# FILTER = FILTER_NAME
+#        | FILTER_NAME "(" FILTER_ARGUMENTS ")"
+# FILTER_ARGUMENTS = EXPRESSIONS | ""
 
 var statement_extensions: Array[StatementExtension] = [
 	VerbatimStatementExtension.new(),
@@ -26,7 +36,7 @@ class Token:
 	extends Resource
 	enum Types {
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
-		RAW_DATA,                 ## Most of the stuff in the source, all that is not our DSL.
+		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
 		ECHO_OPENER,              ## Usually {{
 		ECHO_CLOSER,              ## Usually }}
 		STATEMENT_OPENER,         ## Usually {%
@@ -35,8 +45,8 @@ class Token:
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
 		LITERAL_INTEGER,          ## 42
 		OPERATOR_ADDITION,        ## +
-		OPERATOR_SUBTRACTION,     ## -
-		OPERATOR_MULTIPLICATION,  ## *
+		OPERATOR_SUBTRACTION,     ## - TODO
+		OPERATOR_MULTIPLICATION,  ## * TODO
 	}
 	
 	@export var type := Types.UNKNOWN
@@ -96,6 +106,9 @@ class StringView:
 		self.len = self.len - amount
 		sanitize_delimiters()
 	
+	func read_character_at(relative_position: int) -> String:  # razor sharp
+		return self.string[self.start + relative_position]
+	
 	func get_as_string() -> String:
 		return self.string.substr(self.start, self.len)
 	
@@ -132,6 +145,54 @@ class Tokenizer:
 		tokens = []  # do NOT clear() ; copy is needed ← output of tokenize() !
 		source = ""
 		source_view = null
+		reset_regexes()
+	
+	var openers_regex: RegEx
+	var variable_identifier_regex: RegEx
+	var integer_literal_regex: RegEx
+	
+	# Line start anchor breaks with regex's search offset, yet we use a StringView.
+	# We might want to get rid of it and switch to solution B ; depends on the benchmarks.
+	# A: keep it, keep searching on a substr (copy!) of source on each token (we're doing it)
+	# B: remove it, use the search offset, hope regex is fast (feels like it'll scale worse)
+	const LINE_START_ANCHOR := "^"
+	
+	func reset_regexes():
+		var regex_has_compiled: int
+		
+		self.openers_regex = RegEx.new()
+		regex_has_compiled = self.openers_regex.compile(
+			"(?<symbol>" +
+			escape_for_regex(self.symbol_echo_opener) +
+			"|" +
+			escape_for_regex(self.symbol_statement_opener) +
+			")" +
+			"(?<clear_whitespace>" +
+			escape_for_regex(self.symbol_clear_whitespace) +
+			"|" +
+			escape_for_regex(self.symbol_clear_line_whitespace) +
+			"|" +
+			")"
+		)
+		assert(regex_has_compiled == OK, "Did you change some symbols, perhaps?")
+		
+		self.variable_identifier_regex = RegEx.new()
+		regex_has_compiled = self.variable_identifier_regex.compile(
+			LINE_START_ANCHOR +
+			# This is just BAD DESIGN ; FIXME: use an allowlist
+			("[^0-9%s][^%s]*" % [self.forbidden_identifier_chars, self.forbidden_identifier_chars])
+			# Safer, but ASCII only
+			#"[a-zA-Z_][a-zA-Z0-9_]*"
+		)
+		assert(regex_has_compiled == OK, "Did you change the forbidden identifier characters?")
+		
+		self.integer_literal_regex = RegEx.new()
+		regex_has_compiled = self.integer_literal_regex.compile(
+			LINE_START_ANCHOR +
+			"[0-9]+"
+		)
+		assert(regex_has_compiled == OK, "Numbers must be ßr0k3n")
+	
 	
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
@@ -146,6 +207,7 @@ class Tokenizer:
 				States.ECHO:
 					consume_whitespaces_into_previous_token()
 					tokenize_expression()
+					#tokenize_expression_until_type(Token.Types.ECHO_CLOSER)
 					consume_whitespaces_into_previous_token()
 					tokenize_echo_closer()
 					set_state(States.RAW_DATA)
@@ -168,25 +230,25 @@ class Tokenizer:
 		# With the default configuration, OPENERs are `{{`, `{%` and `{#`.
 		# We need to account for backslashes prefixs, the escape sequences,
 		# and therefore consider as raw data the escaped openings such as `\{{`.
-		var compiled: int
-		var openers_regex := RegEx.new()
-		compiled = openers_regex.compile(
-			"(?<symbol>" +
-			escape_for_regex(self.symbol_echo_opener) +
-			"|" +
-			escape_for_regex(self.symbol_statement_opener) +
-			")" +
-			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
-			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
-			"|" +
-			")"
-		)
-		if compiled != OK:
-			breakpoint
+		#var compiled: int
+		#var openers_regex := RegEx.new()
+		#compiled = openers_regex.compile(
+			#"(?<symbol>" +
+			#escape_for_regex(self.symbol_echo_opener) +
+			#"|" +
+			#escape_for_regex(self.symbol_statement_opener) +
+			#")" +
+			#"(?<clear_whitespace>" +
+			#escape_for_regex(self.symbol_clear_whitespace) +
+			#"|" +
+			#escape_for_regex(self.symbol_clear_line_whitespace) +
+			#"|" +
+			#")"
+		#)
+		#if compiled != OK:
+			#breakpoint
 		
-		var openers_match := self.source_view.search_with_regex_using_anchors(openers_regex)
+		var openers_match := self.source_view.search_with_regex_using_anchors(self.openers_regex)
 		
 		var source_remaining := source_view.get_as_string()
 		if openers_match == null:
@@ -270,30 +332,56 @@ class Tokenizer:
 			add_token(Token.Types.STATEMENT_IDENTIFIER, whole_match)
 			consume_source(whole_match.length())
 	
-	func tokenize_expression() -> int:
+	func tokenize_expression() -> void:
+		var status := OK
+		while status == OK:
+			status = tokenize_expression_once()
+			consume_whitespaces_into_previous_token()
+		
+	func tokenize_expression_once() -> int:
 		if tokenize_variable_identifier() == OK: return OK
-		breakpoint
-		return ERR_METHOD_NOT_FOUND
+		if tokenize_integer_literal() == OK: return OK
+		if tokenize_addition_operator() == OK: return OK
+		if tokenize_multiplication_operator() == OK: return OK
+		return ERR_DOES_NOT_EXIST
+	
+	#func tokenize_expression_until_type(ending_type: Token.Types) -> void:
+		#pass
 	
 	func tokenize_variable_identifier() -> int:
-		var regex_compiled: int
-		var variable_identifier_regex := RegEx.new()
-		regex_compiled = variable_identifier_regex.compile(
-			"^" +
-			("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
-			#"[a-zA-Z_][a-zA-Z0-9_]*"  # safer, ascii-only
-		)
-		if regex_compiled != OK:
-			breakpoint
-			return ERR_PRINTER_ON_FIRE
-		
 		var regex_match := self.source_view.search_with_regex_using_anchors(variable_identifier_regex)
 		if regex_match == null:
-			#assert(false, "Not a variable identifier")
 			return ERR_INVALID_DATA
 		
 		var whole_match := regex_match.get_string()
 		add_token(Token.Types.VARIABLE_IDENTIFIER, whole_match)
+		consume_source(whole_match.length())
+		return OK
+	
+	const addition_operator_symbol := '+'  # maximum one rune (or rewrite stuff)
+	const multiplication_operator_symbol := '*'  # maximum one rune
+	
+	func tokenize_addition_operator() -> int:
+		if self.source_view.read_character_at(0) != addition_operator_symbol:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_ADDITION, addition_operator_symbol)
+		consume_source(1)
+		return OK
+	
+	func tokenize_multiplication_operator() -> int:
+		if self.source_view.read_character_at(0) != multiplication_operator_symbol:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_MULTIPLICATION, multiplication_operator_symbol)
+		consume_source(1)
+		return OK
+	
+	func tokenize_integer_literal() -> int:
+		var regex_match := self.source_view.search_with_regex_using_anchors(integer_literal_regex)
+		if regex_match == null:
+			return ERR_INVALID_DATA
+		
+		var whole_match := regex_match.get_string()
+		add_token(Token.Types.LITERAL_INTEGER, whole_match)
 		consume_source(whole_match.length())
 		return OK
 	
@@ -306,7 +394,7 @@ class Tokenizer:
 	func consume_whitespaces_into_previous_token() -> void:
 		assert(not self.tokens.is_empty())
 		var consumed_whitespaces := consume_whitespaces()
-		self.tokens[-1].whitespaces_after = consumed_whitespaces
+		self.tokens[-1].whitespaces_after += consumed_whitespaces
 		
 	func consume_whitespaces() -> String:
 		var regex_compiled: int
@@ -365,6 +453,10 @@ class SyntaxNode:
 	@export var children: Array[SyntaxNode] = []
 	@export var literal: String
 	@export var tokens: Array[Token] = []
+	
+	func with_token(token: Token) -> SyntaxNode:
+		self.tokens.append(token)
+		return self
 	
 	func with_tokens(tokens: Array[Token]) -> SyntaxNode:
 		self.tokens.append_array(tokens)
@@ -437,8 +529,8 @@ class VariableIdentifierNode:
 		self.identifier = value
 		return self
 
-	func serialize(context: VisitorContext) -> String:
-		return str(context.variables.get(self.identifier, ''))
+	func evaluate(context: VisitorContext) -> Variant:
+		return context.variables.get(self.identifier, '')
 
 
 class IntegerLiteralNode:
@@ -457,6 +549,13 @@ class BinaryOperatorNode:
 	extends ExpressionNode
 	@export var operand_left: ExpressionNode
 	@export var operand_right: ExpressionNode
+	
+	func with_left(operand: ExpressionNode) -> BinaryOperatorNode:
+		self.operand_left = operand
+		return self
+	func with_right(operand: ExpressionNode) -> BinaryOperatorNode:
+		self.operand_right = operand
+		return self
 
 
 class AdditionOperatorNode:
@@ -466,6 +565,17 @@ class AdditionOperatorNode:
 		return (
 			self.operand_left.evaluate(context)
 			+
+			self.operand_right.evaluate(context)
+		)
+
+
+class MultiplicationOperatorNode:
+	extends BinaryOperatorNode
+	
+	func evaluate(context: VisitorContext) -> Variant:
+		return (
+			self.operand_left.evaluate(context)
+			*
 			self.operand_right.evaluate(context)
 		)
 
@@ -552,14 +662,19 @@ class VerbatimStatementExtension:
 		return self.children[0].serialize(context)
 
 
-#class VerbatimStatementNode:
-	#extends StatementNode
-	#func serialize(context: VisitorContext) -> String:
-		#if self.children.is_empty():
-			#return ""
-		#assert(self.children.size() == 1, "Why would there be more ?")
-		#return self.children[0].serialize(context)
-
+# Maybe we'll end up with this, it feels cleaner.  Is it faster, though ?
+#class TokenStream:
+	#extends Resource
+	#@export var tokens: Array[Token]
+	#@export var cursor: int
+	#func _init(tokens: Array[Token] = []) -> void:
+		#self.tokens = tokens
+		#self.cursor = 0
+	#func next() -> Token:
+		#self.cursor += 1
+		#return self.tokens[self.cursor - 1]
+	#func getCurrent() -> Token:
+		#return self.tokens[self.cursor]
 
 
 class ParserContext:
@@ -590,6 +705,12 @@ class ParserContext:
 			<=
 			self.tokens.size()
 		)
+	
+	func match_type(type: Token.Types) -> bool:
+		var matched := get_current_token().type == type
+		if matched:
+			consume_token()
+		return matched
 	
 	func consume_current_token() -> Token:
 		consume_token()
@@ -636,7 +757,7 @@ class Parser:
 		tokens: Array[Token],
 		statement_extensions: Array[StatementExtension],
 	) -> SyntaxTree:
-		var tokens_amount := tokens.size()
+		#var tokens_amount := tokens.size()
 		var body := BodyNode.new()
 		var tree := SyntaxTree.new().with_body(body)
 		var context := (
@@ -656,14 +777,18 @@ class Parser:
 	func parse_token(token: Token, context: ParserContext) -> SyntaxNode:
 		match token.type:
 			Token.Types.RAW_DATA:
-				return RawDataNode.new().with_data(token.literal).with_tokens([token])
+				return RawDataNode.new().with_data(token.literal).with_token(token)
 			Token.Types.ECHO_OPENER:
-				var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
-				var expression: ExpressionNode = parse_expression(tokens_subset, context)
+				#var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
+				var tokens_subset: Array[Token] = []
+				var expression: ExpressionNode = parse_expression(context)
+				if not context.match_type(Token.Types.ECHO_CLOSER):
+					raise_error("Expected }}, but got something else")
+				
 				var echo_tokens: Array[Token] = []
-				echo_tokens.append(token)
-				echo_tokens.append_array(tokens_subset)
-				echo_tokens.append(context.get_current_token(-1))
+				#echo_tokens.append(token)
+				#echo_tokens.append_array(tokens_subset)  # FIXME
+				#echo_tokens.append(context.get_current_token(-1))
 				return EchoNode.new().with_expression(expression).with_tokens(echo_tokens)
 			Token.Types.STATEMENT_OPENER:
 				var tokens_subset := context.consume_until_type(Token.Types.STATEMENT_CLOSER)
@@ -681,23 +806,85 @@ class Parser:
 		# Somewhat safe fallback ; should not happen anyway.
 		return RawDataNode.new().with_data("")
 
-	func parse_expression(tokens_subset: Array[Token], context: ParserContext) -> ExpressionNode:
-		# 
-		assert(tokens_subset.size() > 0, "Expected an expression, got …")
-		#assert(tokens_subset.size() == 1)
+	# Grammar Quick Notes
+	# -------------------
+	# EXPRESSION = VARIABLE_IDENTIFIER
+	#            | LITERAL
+	#            | PREFIX_OPERATOR EXPRESSION
+	#            | EXPRESSION INFIX_OPERATOR EXPRESSION
+	#            | EXPRESSION "|" FILTER
+	#            | "(" EXPRESSION ")"
+	#
+	# Stratified Grammar for Expressions
+	# ----------------------------------
+	# EXPRESSION = EQUALITY
+	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )*
+	# COMPARISON = ADDITION ( ( "<=" | "<" | ">=" | ">" ) ADDITION )*
+	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) MULTIPLICATION )*
+	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MODULO )*
+	# MODULO = FILTER ( "%" FILTER )*
+	# FILTER = UNARY ( "|" FILTER_NAME )*
+	# UNARY = ( "+" | "-" | "!" ) UNARY
+	#       | PRIMARY
+	# PRIMARY = LITERAL
+	#         | "(" EXPRESSION ")"
+	func parse_expression(context: ParserContext) -> ExpressionNode:
+		assert(context.has_tokens_remaining(), "Expected an expression, but got nothing.")
+		return parse_equality(context)
+
+	func parse_equality(context: ParserContext) -> ExpressionNode:
+		# TODO
+		return parse_comparison(context)
+	
+	func parse_comparison(context: ParserContext) -> ExpressionNode:
+		# TODO
+		return parse_addition(context)
+	
+	func parse_addition(context: ParserContext) -> ExpressionNode:
+		var node := parse_multiplication(context)
+		while context.match_type(Token.Types.OPERATOR_ADDITION):
+			node = (
+				AdditionOperatorNode.new()
+				.with_left(node)
+				.with_right(parse_addition(context))
+			)
+		return node
+	
+	func parse_multiplication(context: ParserContext) -> ExpressionNode:
+		var node := parse_primary(context)
+		while context.match_type(Token.Types.OPERATOR_MULTIPLICATION):
+			node = (
+				MultiplicationOperatorNode.new()
+				.with_left(node)
+				.with_right(parse_multiplication(context))
+			)
+		return node
+	
+	#func parse_modulo(context: ParserContext) -> ExpressionNode:
+	#func parse_filter(context: ParserContext) -> ExpressionNode:
+	#func parse_unary(context: ParserContext) -> ExpressionNode:
 		
-		if tokens_subset.size() == 1:
-			var token := tokens_subset[0]
-			match token.type:
-				Token.Types.VARIABLE_IDENTIFIER:
-					return VariableIdentifierNode.new().with_identifier(token.literal)
-				_:
-					breakpoint  # unexpected token
-					return ExpressionNode.new()
+	func parse_primary(context: ParserContext) -> ExpressionNode:
+		# TODO: add parentheses
+		return parse_literal(context)
+			
 		
 		
-		
-		return ExpressionNode.new()
+	func parse_literal(context: ParserContext) -> ExpressionNode:
+		var token := context.consume_current_token()
+		match token.type:
+			Token.Types.VARIABLE_IDENTIFIER:
+				return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token)
+			Token.Types.LITERAL_INTEGER:
+				return IntegerLiteralNode.new().with_value(int(token.literal)).with_token(token)
+			_:
+				raise_error("Expected a literal, got `%s`." % token)
+				return ExpressionNode.new()
+	
+	func raise_error(message: String):
+		#printerr(message)
+		push_error(message)
+		assert(false, message)
 
 
 class VisitorContext:
@@ -731,6 +918,10 @@ func render(source: String, variables: Dictionary) -> String:
 	
 	var tokenizer := Tokenizer.new()
 	var tokens := tokenizer.tokenize(source)
+	
+	prints("Source:", source)
+	prints("Variables:", variables)
+	prints("Tokens:", tokens)
 	
 	var parser := Parser.new()
 	var syntax_tree := parser.parse(tokens, self.statement_extensions)

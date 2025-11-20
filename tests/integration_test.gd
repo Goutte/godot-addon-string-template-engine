@@ -152,20 +152,44 @@ func test_a_bunch_of_use_cases() -> void:
 			#
 			#""",
 		#},
-		#{
-			#&'rule': "Addition of integers",
-			#&'template': """
-			#Current: {{ current }}
-			#Next: {{ current + 1 }}
-			#""",
-			#&'variables': {
-				#&'current': 41,
-			#},
-			#&'expected': """
-			#Current: 41
-			#Next: 42
-			#""",
-		#},
+		{
+			&'rule': "Addition of integers",
+			&'template': """
+			Current: {{ current }}
+			Next: {{ current + 1 }}
+			""",
+			&'variables': {
+				&'current': 41,
+			},
+			&'expected': """
+			Current: 41
+			Next: 42
+			""",
+		},
+		{
+			&'rule': "Chained addition of integers",
+			&'template': """
+			{{ current + 1 + current + 3 }}
+			""",
+			&'variables': {
+				&'current': 41,
+			},
+			&'expected': """
+			86
+			""",
+		},
+		{
+			&'rule': "Multiplication of integers",
+			&'template': """
+			{{ current * 3 }}
+			""",
+			&'variables': {
+				&'current': 7,
+			},
+			&'expected': """
+			21
+			""",
+		},
 	]
 	var engine := StringEngine.new()
 	for datum: Dictionary in data:
