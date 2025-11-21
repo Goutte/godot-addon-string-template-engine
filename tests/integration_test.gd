@@ -40,7 +40,7 @@ func test_a_bunch_of_use_cases() -> void:
 		},
 		{
 			&'rule': "Echo a variable (whitespaces are conflatable)",
-			&'template': "Hello {{   name     }}!",
+			&'template': "Hello {{   name  		  }}!",
 			&'variables': {
 				&'name': 'there',
 			},
@@ -74,19 +74,18 @@ func test_a_bunch_of_use_cases() -> void:
 			Cordially, yours truly.
 			""",
 		},
-		{
-			# FIXME: We need an allowlist for this, not the garbage we have right now.
-			&'rule': "Allow unicode runes (unsafely)",
-			&'template': """
-			🥳 with 🦊 like {{ 🦋 }}
-			""",
-			&'variables': {
-				&'🦋': "🦺",
-			},
-			&'expected': """
-			🥳 with 🦊 like 🦺
-			""",
-		},
+		#{
+			#&'rule': "Allow unicode runes (unsafe)",
+			#&'template': """
+			#🥳 with 🦊 like {{ 🦋 }}
+			#""",
+			#&'variables': {
+				#&'🦋': "🦺",
+			#},
+			#&'expected': """
+			#🥳 with 🦊 like 🦺
+			#""",
+		#},
 		{
 			# NOTE: Use {% verbatim %} … {% endverbatim %} instead of escape sequances
 			&'rule': "Backslashes do NOT escape instructions",
@@ -179,6 +178,37 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
+			&'rule': "Floats",
+			&'template': """
+			{{ 1.618 }}
+			{{ tau }}
+			{{ tau * tau }}
+			""",
+			&'variables': {
+				&'tau': TAU,
+			},
+			&'expected': """
+			1.618
+			6.28318530717959
+			39.4784176043574
+			""",
+		},
+		#{
+			#&'rule': "Arithmetic with Floats",
+			#&'template': """
+			#{{ tau + tau }}
+			#{{ tau - tau }}
+			#{{ tau * tau }}
+			#{{ tau / tau }}
+			#""",
+			#&'variables': {
+				#&'tau': TAU,
+			#},
+			#&'expected': """
+			#39.4784176043574
+			#""",
+		#},
+		{
 			&'rule': "Multiplication of integers",
 			&'template': """
 			{{ current * 3 }}
@@ -188,6 +218,64 @@ func test_a_bunch_of_use_cases() -> void:
 			},
 			&'expected': """
 			21
+			""",
+		},
+		{
+			&'rule': "Support basic +-*/ arithmetic with precedence",
+			&'template': """
+			{{ 1 + a * 3 + 6 / 3 }}
+			""",
+			&'variables': {
+				&'a': 4,
+			},
+			&'expected': """
+			15
+			""",
+		},
+		{
+			&'rule': "Support negative numbers",
+			&'template': """
+			{{ -2 * -5 * -11 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			-110
+			""",
+		},
+		{
+			&'rule': "Positive unary operator does nothing special",
+			&'template': """
+			{{ +2 }}
+			{{ +2 * -5 * +1 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			2
+			-10
+			""",
+		},
+		{
+			&'rule': "Modulo of integers",
+			&'template': """
+			{{ 20 % 3 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			2
+			""",
+		},
+		{
+			&'rule': "Not operator works like Godot's",
+			&'template': """
+			{{ !0 }}
+			{{ !1 }}
+			{{ ! 41 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			true
+			false
+			false
 			""",
 		},
 	]

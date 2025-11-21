@@ -44,9 +44,13 @@ class Token:
 		STATEMENT_IDENTIFIER,     ## Examples: for, if, verbatim…
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
 		LITERAL_INTEGER,          ## 42
+		LITERAL_FLOAT,            ## 1.618
 		OPERATOR_ADDITION,        ## +
-		OPERATOR_SUBTRACTION,     ## - TODO
-		OPERATOR_MULTIPLICATION,  ## * TODO
+		OPERATOR_SUBTRACTION,     ## -
+		OPERATOR_MULTIPLICATION,  ## *
+		OPERATOR_DIVISION,        ## /
+		OPERATOR_MODULO,          ## %
+		OPERATOR_NOT,             ## !
 	}
 	
 	@export var type := Types.UNKNOWN
@@ -66,6 +70,8 @@ class Token:
 		return self.literal
 
 
+## The goal is/was to copy less strings.
+## But regex search using offset ignores line anchors like ^, so we copy anyway.
 class StringView:
 	extends Resource
 	@export var string: String
@@ -73,9 +79,9 @@ class StringView:
 	@export var len: int
 	
 	func _init(
-		string := "",
-		start := -1,
-		len:= -1,
+		string := "",  # Provide this, 'tis only optional to please Godot IIRC
+		start := -1,   # Defaults to 0
+		len := -1,     # Defaults to the string's length
 	) -> void:
 		self.string = string
 		if start < 0:
@@ -86,20 +92,26 @@ class StringView:
 		self.len = len
 		sanitize_delimiters()
 	
+	func _to_string() -> String:
+		return get_as_string()
+	
+	func get_as_string() -> String:
+		return self.string.substr(self.start, self.len)
+	
+	func length() -> int:
+		return self.len
+	
 	func sanitize_delimiters() -> void:
 		self.start = clampi(self.start, 0, self.string.length())
-		self.len = clampi(self.len, 0, self.string.length())
+		self.len = clampi(self.len, 0, self.string.length()-self.start)
 	
 	func search_with_regex(regex: RegEx) -> RegExMatch:
 		# This is faster but breaks on line anchor metacharacters like ^ and $
 		return regex.search(self.string, self.start, self.start + self.len)
 	
 	func search_with_regex_using_anchors(regex: RegEx) -> RegExMatch:
-		# Slower, but it just works.
+		# Slower (by how much?), but it "Just Works".
 		return regex.search(self.get_as_string())
-	
-	func length() -> int:
-		return self.len
 	
 	func shrink_from_start_by(amount: int) -> void:
 		self.start = self.start + amount
@@ -108,12 +120,6 @@ class StringView:
 	
 	func read_character_at(relative_position: int) -> String:  # razor sharp
 		return self.string[self.start + relative_position]
-	
-	func get_as_string() -> String:
-		return self.string.substr(self.start, self.len)
-	
-	func _to_string() -> String:
-		return get_as_string()
 
 
 ## Probably closer to a Lexer now, as its states are kinda tied to our grammar.
@@ -132,6 +138,7 @@ class Tokenizer:
 	var symbol_echo_closer := '}}'
 	var symbol_statement_opener := '{%'
 	var symbol_statement_closer := '%}'
+	var symbol_operator_modulo := '%'
 	
 	# Privates
 	var state: States
@@ -150,6 +157,7 @@ class Tokenizer:
 	var openers_regex: RegEx
 	var variable_identifier_regex: RegEx
 	var integer_literal_regex: RegEx
+	var float_literal_regex: RegEx
 	
 	# Line start anchor breaks with regex's search offset, yet we use a StringView.
 	# We might want to get rid of it and switch to solution B ; depends on the benchmarks.
@@ -180,9 +188,10 @@ class Tokenizer:
 		regex_has_compiled = self.variable_identifier_regex.compile(
 			LINE_START_ANCHOR +
 			# This is just BAD DESIGN ; FIXME: use an allowlist
-			("[^0-9%s][^%s]*" % [self.forbidden_identifier_chars, self.forbidden_identifier_chars])
+			#("[^0-9%s][^%s]*" % [self.forbidden_identifier_chars, self.forbidden_identifier_chars])
 			# Safer, but ASCII only
-			#"[a-zA-Z_][a-zA-Z0-9_]*"
+			"[a-zA-Z_][a-zA-Z0-9_]*"
+			#"[\\w_][\\w0-9_]*"
 		)
 		assert(regex_has_compiled == OK, "Did you change the forbidden identifier characters?")
 		
@@ -190,6 +199,23 @@ class Tokenizer:
 		regex_has_compiled = self.integer_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"[0-9]+"
+		)
+		assert(regex_has_compiled == OK, "Numbers must be ßr0k3n")
+		
+		#new Regex(  "^(" +
+		#/*Hex*/ @"0x[0-9a-f]+"  + "|" +
+		#/*Bin*/ @"0b[01]+"      + "|" + 
+		#/*Oct*/ @"0[0-7]*"      + "|" +
+		#/*Dec*/ @"((?!0)|[-+]|(?=0+\.))(\d*\.)?\d+(e\d+)?" + 
+		#")$" );
+		self.float_literal_regex = RegEx.new()
+		regex_has_compiled = self.float_literal_regex.compile(
+			LINE_START_ANCHOR +
+			"(?:" +
+			"[0-9]+[.][0-9]*" +  # 2.0 or 2.
+			"|" +
+			"[0-9]*[.][0-9]+" +  # .2
+			")"
 		)
 		assert(regex_has_compiled == OK, "Numbers must be ßr0k3n")
 	
@@ -223,30 +249,10 @@ class Tokenizer:
 		
 		return self.tokens
 	
-	# @protected
 	func tokenize_raw_data() -> void:
 		# There is no way to discriminate raw data by itself.
 		# We're going to advance to the first found OPENER of our syntax.
 		# With the default configuration, OPENERs are `{{`, `{%` and `{#`.
-		# We need to account for backslashes prefixs, the escape sequences,
-		# and therefore consider as raw data the escaped openings such as `\{{`.
-		#var compiled: int
-		#var openers_regex := RegEx.new()
-		#compiled = openers_regex.compile(
-			#"(?<symbol>" +
-			#escape_for_regex(self.symbol_echo_opener) +
-			#"|" +
-			#escape_for_regex(self.symbol_statement_opener) +
-			#")" +
-			#"(?<clear_whitespace>" +
-			#escape_for_regex(self.symbol_clear_whitespace) +
-			#"|" +
-			#escape_for_regex(self.symbol_clear_line_whitespace) +
-			#"|" +
-			#")"
-		#)
-		#if compiled != OK:
-			#breakpoint
 		
 		var openers_match := self.source_view.search_with_regex_using_anchors(self.openers_regex)
 		
@@ -287,6 +293,7 @@ class Tokenizer:
 		var compiled: int
 		var close_regex := RegEx.new()
 		compiled = close_regex.compile(
+			LINE_START_ANCHOR +
 			"(?<clear_whitespace>" +
 			escape_for_regex(self.symbol_clear_whitespace) +
 			"|" +
@@ -300,10 +307,14 @@ class Tokenizer:
 		if compiled != OK:
 			breakpoint
 		
-		var close_match := self.source_view.search_with_regex(close_regex)
+		var close_match := self.source_view.search_with_regex_using_anchors(close_regex)
 		if close_match == null:
-			assert(false, "Expected close token, got (TODO) instead")
-			consume_source(source_view.length())  # no infinite loops for you
+			assert(false, "Expected closer token `%s`, got `%s` instead" % [
+				symbol,
+				self.source_view.read_character_at(0) + 
+				self.source_view.read_character_at(1)
+			])
+			consume_source(self.source_view.length())  # infinite loop prevention
 		else:
 			var whole_match := close_match.get_string()
 			var close_symbol := close_match.get_string(&'symbol')
@@ -311,7 +322,8 @@ class Tokenizer:
 			add_token(token_type, whole_match)
 			consume_source(whole_match.length())
 	
-	var forbidden_identifier_chars := " #%<>{}()\\[\\]^'\"|.~+*-"  # MUST end with -
+	# FIXME: worst design in the history of designs, hf w/ rtl !
+	var forbidden_identifier_chars := " \\\\/#%?!<>{}()\\[\\]^'\"`|:;,.~+*-"  # MUST end with -
 	
 	func tokenize_statement_identifier() -> void:
 		var regex_compiled: int
@@ -339,14 +351,17 @@ class Tokenizer:
 			consume_whitespaces_into_previous_token()
 		
 	func tokenize_expression_once() -> int:
+		# The order matters.  Eg: float MUST be tokenized BEFORE int
 		if tokenize_variable_identifier() == OK: return OK
+		if tokenize_float_literal() == OK: return OK
 		if tokenize_integer_literal() == OK: return OK
 		if tokenize_addition_operator() == OK: return OK
+		if tokenize_subtraction_operator() == OK: return OK
 		if tokenize_multiplication_operator() == OK: return OK
+		if tokenize_division_operator() == OK: return OK
+		if tokenize_modulo_operator() == OK: return OK
+		if tokenize_not_operator() == OK: return OK
 		return ERR_DOES_NOT_EXIST
-	
-	#func tokenize_expression_until_type(ending_type: Token.Types) -> void:
-		#pass
 	
 	func tokenize_variable_identifier() -> int:
 		var regex_match := self.source_view.search_with_regex_using_anchors(variable_identifier_regex)
@@ -358,8 +373,11 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
-	const addition_operator_symbol := '+'  # maximum one rune (or rewrite stuff)
-	const multiplication_operator_symbol := '*'  # maximum one rune
+	const addition_operator_symbol := '+'  # maximum one rune
+	const subtraction_operator_symbol := '-'  # maximum one rune
+	const multiplication_operator_symbol := '*'  # TODO: support × as well?
+	const division_operator_symbol := '/'  # TODO: support ÷ as well?
+	const not_operator_symbol := '!'  # TODO: support `not` as well?
 	
 	func tokenize_addition_operator() -> int:
 		if self.source_view.read_character_at(0) != addition_operator_symbol:
@@ -368,10 +386,38 @@ class Tokenizer:
 		consume_source(1)
 		return OK
 	
+	func tokenize_subtraction_operator() -> int:
+		if self.source_view.read_character_at(0) != subtraction_operator_symbol:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_SUBTRACTION, subtraction_operator_symbol)
+		consume_source(1)
+		return OK
+	
 	func tokenize_multiplication_operator() -> int:
 		if self.source_view.read_character_at(0) != multiplication_operator_symbol:
 			return ERR_INVALID_DATA
 		add_token(Token.Types.OPERATOR_MULTIPLICATION, multiplication_operator_symbol)
+		consume_source(1)
+		return OK
+	
+	func tokenize_division_operator() -> int:
+		if self.source_view.read_character_at(0) != division_operator_symbol:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_DIVISION, division_operator_symbol)
+		consume_source(1)
+		return OK
+	
+	func tokenize_modulo_operator() -> int:
+		if self.source_view.read_character_at(0) != self.symbol_operator_modulo:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_MODULO, self.symbol_operator_modulo)
+		consume_source(self.symbol_operator_modulo.length())
+		return OK
+	
+	func tokenize_not_operator() -> int:
+		if self.source_view.read_character_at(0) != not_operator_symbol:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_NOT, not_operator_symbol)
 		consume_source(1)
 		return OK
 	
@@ -385,11 +431,21 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
+	func tokenize_float_literal() -> int:
+		var regex_match := self.source_view.search_with_regex_using_anchors(float_literal_regex)
+		if regex_match == null:
+			return ERR_INVALID_DATA
+		
+		var whole_match := regex_match.get_string()
+		add_token(Token.Types.LITERAL_FLOAT, whole_match)
+		consume_source(whole_match.length())
+		return OK
+	
 	func set_state(value: States) -> void:
 		self.state = value
 	
 	func add_token(type: Token.Types, literal: String) -> void:
-		tokens.append(Token.new().with_type(type).with_literal(literal))
+		self.tokens.append(Token.new().with_type(type).with_literal(literal))
 	
 	func consume_whitespaces_into_previous_token() -> void:
 		assert(not self.tokens.is_empty())
@@ -400,7 +456,7 @@ class Tokenizer:
 		var regex_compiled: int
 		var whitespaces_regex := RegEx.new()
 		regex_compiled = whitespaces_regex.compile(
-			"^[ ]+"
+			"^[\\s]+"
 		)
 		if regex_compiled != OK:
 			breakpoint  # regex broke ; dev intrigued
@@ -410,8 +466,6 @@ class Tokenizer:
 		if whitespaces_match != null:
 			consume_source(whitespaces_match.get_string().length())
 			return whitespaces_match.get_string()
-		
-		#breakpoint
 		
 		return ""
 	
@@ -442,8 +496,10 @@ class Tokenizer:
 			.replace("]", "\\]")
 			.replace("{", "\\{")
 			.replace("}", "\\}")
+			.replace("<", "\\<")
+			.replace(">", "\\>")
+			.replace(":", "\\:")
 			.replace("|", "\\|")
-			# : < > are missing, no ?
 		)
 
 
@@ -451,7 +507,6 @@ class Tokenizer:
 class SyntaxNode:
 	extends Resource
 	@export var children: Array[SyntaxNode] = []
-	@export var literal: String
 	@export var tokens: Array[Token] = []
 	
 	func with_token(token: Token) -> SyntaxNode:
@@ -460,6 +515,10 @@ class SyntaxNode:
 	
 	func with_tokens(tokens: Array[Token]) -> SyntaxNode:
 		self.tokens.append_array(tokens)
+		return self
+	
+	func with_child(child: SyntaxNode) -> SyntaxNode:
+		self.children.append(child)
 		return self
 	
 	func with_children(children: Array[SyntaxNode]) -> SyntaxNode:
@@ -510,11 +569,11 @@ class RawDataNode:
 	@export var data: String = ""
 	
 	func with_data(value: String) -> RawDataNode:
-		self.data = value
+		self.data += value
 		return self
 	
 	func serialize_self(context: VisitorContext) -> String:
-		return data
+		return self.data
 
 
 class ExpressionNode:
@@ -545,39 +604,110 @@ class IntegerLiteralNode:
 		return self.value
 
 
-class BinaryOperatorNode:
+class FloatLiteralNode:
 	extends ExpressionNode
-	@export var operand_left: ExpressionNode
-	@export var operand_right: ExpressionNode
+	@export var value: float
 	
-	func with_left(operand: ExpressionNode) -> BinaryOperatorNode:
-		self.operand_left = operand
+	func with_value(value: float) -> FloatLiteralNode:
+		self.value = value
 		return self
-	func with_right(operand: ExpressionNode) -> BinaryOperatorNode:
-		self.operand_right = operand
-		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		return self.value
+
+
+class OperatorNode:
+	extends ExpressionNode
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
+class UnaryOperatorNode:
+	extends OperatorNode
+	func evaluate_unary(operand: Variant) -> Variant:
+		breakpoint  # you MUST override me !
+		return ""
+	func evaluate(context: VisitorContext) -> Variant:
+		assert(self.children.size() == 1)
+		return evaluate_unary(self.children[0].evaluate(context))
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
+class PositiveUnaryOperatorNode:
+	extends UnaryOperatorNode
+	func evaluate_unary(operand: Variant) -> Variant:
+		return +operand
+
+
+class NegativeUnaryOperatorNode:
+	extends UnaryOperatorNode
+	func evaluate_unary(operand: Variant) -> Variant:
+		return -operand
+
+
+class NotUnaryOperatorNode:
+	extends UnaryOperatorNode
+	func evaluate_unary(operand: Variant) -> Variant:
+		return !operand
+
+
+class BinaryOperatorNode:
+	extends OperatorNode
+	
+	#@export var operand_left: ExpressionNode
+	#@export var operand_right: ExpressionNode
+	#func with_left(operand: ExpressionNode) -> BinaryOperatorNode:
+		#self.operand_left = operand
+		#return self
+	#func with_right(operand: ExpressionNode) -> BinaryOperatorNode:
+		#self.operand_right = operand
+		#return self
+	
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		breakpoint  # you MUST override me !
+		return null
+	
+	func evaluate(context: VisitorContext) -> Variant:
+		assert(self.children.size() == 2)
+		return evaluate_binary(
+			self.children[0].evaluate(context),
+			self.children[1].evaluate(context),
+		)
+		#return evaluate_binary(
+			#self.operand_left.evaluate(context),
+			#self.operand_right.evaluate(context),
+		#)
 
 
 class AdditionOperatorNode:
 	extends BinaryOperatorNode
-	
-	func evaluate(context: VisitorContext) -> Variant:
-		return (
-			self.operand_left.evaluate(context)
-			+
-			self.operand_right.evaluate(context)
-		)
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left + right
+
+
+class SubtractionOperatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left - right
 
 
 class MultiplicationOperatorNode:
 	extends BinaryOperatorNode
-	
-	func evaluate(context: VisitorContext) -> Variant:
-		return (
-			self.operand_left.evaluate(context)
-			*
-			self.operand_right.evaluate(context)
-		)
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left * right
+
+
+class DivisionOperatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left / right
+
+
+class ModuloOperatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left % right
 
 
 class StatementIdentifierNode:
@@ -591,7 +721,7 @@ class StatementIdentifierNode:
 
 class EchoNode:
 	extends SyntaxNode
-	# Perhaps just use children with only one child allowed instead of this ?
+	# FIXME Perhaps just use children with only one child allowed instead of this ?
 	@export var expression: ExpressionNode
 
 	func with_expression(value: ExpressionNode) -> EchoNode:
@@ -706,18 +836,21 @@ class ParserContext:
 			self.tokens.size()
 		)
 	
+	## Checks and consumes if matched.
 	func match_type(type: Token.Types) -> bool:
 		var matched := get_current_token().type == type
 		if matched:
 			consume_token()
 		return matched
 	
-	func consume_current_token() -> Token:
-		consume_token()
-		return get_current_token(-1)
-	
 	func get_current_token(offset := 0) -> Token:
 		return self.tokens[self.current_token_index + offset]
+	func get_previous_token() -> Token:
+		return get_current_token(-1)
+	
+	func consume_current_token() -> Token:
+		consume_token()
+		return get_previous_token()
 	
 	func consume_token() -> void:
 		self.current_token_index += 1
@@ -757,7 +890,6 @@ class Parser:
 		tokens: Array[Token],
 		statement_extensions: Array[StatementExtension],
 	) -> SyntaxTree:
-		#var tokens_amount := tokens.size()
 		var body := BodyNode.new()
 		var tree := SyntaxTree.new().with_body(body)
 		var context := (
@@ -783,7 +915,7 @@ class Parser:
 				var tokens_subset: Array[Token] = []
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
-					raise_error("Expected }}, but got something else")
+					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
 				
 				var echo_tokens: Array[Token] = []
 				#echo_tokens.append(token)
@@ -827,6 +959,7 @@ class Parser:
 	# UNARY = ( "+" | "-" | "!" ) UNARY
 	#       | PRIMARY
 	# PRIMARY = LITERAL
+	#         | VARIABLE_IDENTIFIER
 	#         | "(" EXPRESSION ")"
 	func parse_expression(context: ParserContext) -> ExpressionNode:
 		assert(context.has_tokens_remaining(), "Expected an expression, but got nothing.")
@@ -842,34 +975,91 @@ class Parser:
 	
 	func parse_addition(context: ParserContext) -> ExpressionNode:
 		var node := parse_multiplication(context)
-		while context.match_type(Token.Types.OPERATOR_ADDITION):
-			node = (
-				AdditionOperatorNode.new()
-				.with_left(node)
-				.with_right(parse_addition(context))
-			)
+		while (
+			context.match_type(Token.Types.OPERATOR_ADDITION) or
+			context.match_type(Token.Types.OPERATOR_SUBTRACTION)
+		):
+			match context.get_previous_token().type:
+				Token.Types.OPERATOR_ADDITION:
+					node = (
+						AdditionOperatorNode.new()
+						.with_child(node)
+						.with_child(parse_addition(context))
+					)
+				Token.Types.OPERATOR_SUBTRACTION:
+					node = (
+						SubtractionOperatorNode.new()
+						.with_child(node)
+						.with_child(parse_addition(context))
+					)
+				_:
+					breakpoint
 		return node
 	
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
-		var node := parse_primary(context)
-		while context.match_type(Token.Types.OPERATOR_MULTIPLICATION):
+		var node := parse_modulo(context)
+		while (
+			context.match_type(Token.Types.OPERATOR_MULTIPLICATION) or
+			context.match_type(Token.Types.OPERATOR_DIVISION)
+		):
+			match context.get_previous_token().type:
+				Token.Types.OPERATOR_MULTIPLICATION:
+					node = (
+						MultiplicationOperatorNode.new()
+						.with_child(node)
+						.with_child(parse_multiplication(context))
+					)
+				Token.Types.OPERATOR_DIVISION:
+					node = (
+						DivisionOperatorNode.new()
+						.with_child(node)
+						.with_child(parse_multiplication(context))
+					)
+				_:
+					breakpoint
+		return node
+	
+	func parse_modulo(context: ParserContext) -> ExpressionNode:
+		var node := parse_unary(context)
+		while (context.match_type(Token.Types.OPERATOR_MODULO)):
 			node = (
-				MultiplicationOperatorNode.new()
-				.with_left(node)
-				.with_right(parse_multiplication(context))
+				ModuloOperatorNode.new()
+				.with_child(node)
+				.with_child(parse_modulo(context))
 			)
 		return node
 	
-	#func parse_modulo(context: ParserContext) -> ExpressionNode:
 	#func parse_filter(context: ParserContext) -> ExpressionNode:
-	#func parse_unary(context: ParserContext) -> ExpressionNode:
+	
+	func parse_unary(context: ParserContext) -> ExpressionNode:
+		var node: ExpressionNode
+		if (
+			context.match_type(Token.Types.OPERATOR_NOT) or
+			context.match_type(Token.Types.OPERATOR_ADDITION) or
+			context.match_type(Token.Types.OPERATOR_SUBTRACTION)
+		):
+			match context.get_previous_token().type:
+				Token.Types.OPERATOR_ADDITION:
+					node = PositiveUnaryOperatorNode.new()
+				Token.Types.OPERATOR_SUBTRACTION:
+					node = NegativeUnaryOperatorNode.new()
+				Token.Types.OPERATOR_NOT:
+					node = NotUnaryOperatorNode.new()
+				_:
+					breakpoint
 		
+		if node:
+			node.with_child(parse_primary(context))
+			node.with_token(context.get_previous_token())
+		else:
+			node = parse_primary(context)
+		
+		return node
+	
 	func parse_primary(context: ParserContext) -> ExpressionNode:
 		# TODO: add parentheses
 		return parse_literal(context)
-			
-		
-		
+	
 	func parse_literal(context: ParserContext) -> ExpressionNode:
 		var token := context.consume_current_token()
 		match token.type:
@@ -877,13 +1067,15 @@ class Parser:
 				return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token)
 			Token.Types.LITERAL_INTEGER:
 				return IntegerLiteralNode.new().with_value(int(token.literal)).with_token(token)
+			Token.Types.LITERAL_FLOAT:
+				return FloatLiteralNode.new().with_value(float(token.literal)).with_token(token)
 			_:
 				raise_error("Expected a literal, got `%s`." % token)
 				return ExpressionNode.new()
 	
 	func raise_error(message: String):
-		#printerr(message)
-		push_error(message)
+		printerr(message)
+		#push_error(message)
 		assert(false, message)
 
 
