@@ -101,6 +101,173 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
+			&'rule': "Addition of integers",
+			&'template': """
+			Current: {{ current }}
+			Next: {{ current + 1 }}
+			""",
+			&'variables': {
+				&'current': 41,
+			},
+			&'expected': """
+			Current: 41
+			Next: 42
+			""",
+		},
+		{
+			&'rule': "Chained addition of integers",
+			&'template': """
+			{{ current + 1 + current + 3 }}
+			""",
+			&'variables': {
+				&'current': 41,
+			},
+			&'expected': """
+			86
+			""",
+		},
+		{
+			&'rule': "Floats",
+			&'template': """
+			{{ 1.618 }}
+			{{ tau }}
+			{{ tau * tau }}
+			""",
+			&'variables': {
+				&'tau': TAU,
+			},
+			&'expected': """
+			1.618
+			6.28318530717959
+			39.4784176043574
+			""",
+		},
+		{
+			&'rule': "Arithmetic with Floats",
+			&'template': """
+			{{ tau + tau }}
+			{{ tau - tau }}
+			{{ tau * tau }}
+			{{ tau / tau }}
+			""",
+			&'variables': {
+				&'tau': TAU,
+			},
+			&'expected': """
+			12.5663706143592
+			0.0
+			39.4784176043574
+			1.0
+			""",
+		},
+		{
+			&'rule': "Multiplication of integers",
+			&'template': """
+			{{ current * 3 }}
+			""",
+			&'variables': {
+				&'current': 7,
+			},
+			&'expected': """
+			21
+			""",
+		},
+		{
+			&'rule': "Basic +-*/ arithmetic with precedence",
+			&'template': """
+			{{ 1 + a * 3 + 6 / 3 }}
+			""",
+			&'variables': {
+				&'a': 4,
+			},
+			&'expected': """
+			15
+			""",
+		},
+		{
+			&'rule': "Negative numbers",
+			&'template': """
+			{{ -2 * -5 * -11 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			-110
+			""",
+		},
+		{
+			&'rule': "Positive unary operator does nothing special",
+			&'template': """
+			{{ +2 }}
+			{{ +2 * -5 * +1 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			2
+			-10
+			""",
+		},
+		{
+			&'rule': "Modulo of integers",
+			&'template': """
+			{{ 20 % 3 }}
+			{{ -20 % 3 }}
+			{{ 20 % -3 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			2
+			-2
+			2
+			""",
+		},
+		{
+			&'rule': "Modulo of floats",
+			&'template': """
+			{{ 10.1 % 3.3 }}
+			{{ 20.125 % 3 }}
+			{{ 10 % 3.3 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			0.2
+			2.125
+			0.1
+			""",
+		},
+		{
+			&'rule': "Not operator works like Godot's",
+			&'template': """
+			{{ !0 }}
+			{{ !1 }}
+			{{ ! 41 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			true
+			false
+			false
+			""",
+		},
+		{
+			&'rule': "Equality",
+			&'template': """
+			{{ 1 == 1 }}
+			{{ 1 == 2 }}
+			{{ a == b }}
+			{{ a != b }}
+			""",
+			&'variables': {
+				&'a': 7,
+				&'b': 0,
+			},
+			&'expected': """
+			true
+			false
+			false
+			true
+			""",
+		},
+		{
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
@@ -151,133 +318,6 @@ func test_a_bunch_of_use_cases() -> void:
 			#
 			#""",
 		#},
-		{
-			&'rule': "Addition of integers",
-			&'template': """
-			Current: {{ current }}
-			Next: {{ current + 1 }}
-			""",
-			&'variables': {
-				&'current': 41,
-			},
-			&'expected': """
-			Current: 41
-			Next: 42
-			""",
-		},
-		{
-			&'rule': "Chained addition of integers",
-			&'template': """
-			{{ current + 1 + current + 3 }}
-			""",
-			&'variables': {
-				&'current': 41,
-			},
-			&'expected': """
-			86
-			""",
-		},
-		{
-			&'rule': "Floats",
-			&'template': """
-			{{ 1.618 }}
-			{{ tau }}
-			{{ tau * tau }}
-			""",
-			&'variables': {
-				&'tau': TAU,
-			},
-			&'expected': """
-			1.618
-			6.28318530717959
-			39.4784176043574
-			""",
-		},
-		#{
-			#&'rule': "Arithmetic with Floats",
-			#&'template': """
-			#{{ tau + tau }}
-			#{{ tau - tau }}
-			#{{ tau * tau }}
-			#{{ tau / tau }}
-			#""",
-			#&'variables': {
-				#&'tau': TAU,
-			#},
-			#&'expected': """
-			#39.4784176043574
-			#""",
-		#},
-		{
-			&'rule': "Multiplication of integers",
-			&'template': """
-			{{ current * 3 }}
-			""",
-			&'variables': {
-				&'current': 7,
-			},
-			&'expected': """
-			21
-			""",
-		},
-		{
-			&'rule': "Support basic +-*/ arithmetic with precedence",
-			&'template': """
-			{{ 1 + a * 3 + 6 / 3 }}
-			""",
-			&'variables': {
-				&'a': 4,
-			},
-			&'expected': """
-			15
-			""",
-		},
-		{
-			&'rule': "Support negative numbers",
-			&'template': """
-			{{ -2 * -5 * -11 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			-110
-			""",
-		},
-		{
-			&'rule': "Positive unary operator does nothing special",
-			&'template': """
-			{{ +2 }}
-			{{ +2 * -5 * +1 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			2
-			-10
-			""",
-		},
-		{
-			&'rule': "Modulo of integers",
-			&'template': """
-			{{ 20 % 3 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			2
-			""",
-		},
-		{
-			&'rule': "Not operator works like Godot's",
-			&'template': """
-			{{ !0 }}
-			{{ !1 }}
-			{{ ! 41 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			true
-			false
-			false
-			""",
-		},
 	]
 	var engine := StringEngine.new()
 	for datum: Dictionary in data:

@@ -37,10 +37,10 @@ class Token:
 	enum Types {
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
 		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
-		ECHO_OPENER,              ## Usually {{
-		ECHO_CLOSER,              ## Usually }}
-		STATEMENT_OPENER,         ## Usually {%
-		STATEMENT_CLOSER,         ## Usually %}
+		ECHO_OPENER,              ## {{
+		ECHO_CLOSER,              ## }}
+		STATEMENT_OPENER,         ## {%
+		STATEMENT_CLOSER,         ## %}
 		STATEMENT_IDENTIFIER,     ## Examples: for, if, verbatim…
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
 		LITERAL_INTEGER,          ## 42
@@ -51,6 +51,12 @@ class Token:
 		OPERATOR_DIVISION,        ## /
 		OPERATOR_MODULO,          ## %
 		OPERATOR_NOT,             ## !
+		COMPARATOR_EQUAL,         ## ==
+		COMPARATOR_INEQUAL,       ## !=
+		COMPARATOR_LESS,          ## <
+		COMPARATOR_LESS_EQUAL,    ## <=
+		COMPARATOR_GREATER,       ## >
+		COMPARATOR_GREATER_EQUAL, ## >=
 	}
 	
 	@export var type := Types.UNKNOWN
@@ -105,6 +111,9 @@ class StringView:
 		self.start = clampi(self.start, 0, self.string.length())
 		self.len = clampi(self.len, 0, self.string.length()-self.start)
 	
+	func begins_with(prefix: String) -> bool:
+		return prefix == self.string.substr(self.start, prefix.length())
+	
 	func search_with_regex(regex: RegEx) -> RegExMatch:
 		# This is faster but breaks on line anchor metacharacters like ^ and $
 		return regex.search(self.string, self.start, self.start + self.len)
@@ -139,6 +148,12 @@ class Tokenizer:
 	var symbol_statement_opener := '{%'
 	var symbol_statement_closer := '%}'
 	var symbol_operator_modulo := '%'
+	var symbol_comparator_equal := '=='
+	var symbol_comparator_inequal := '!='
+	var symbol_comparator_less_than := '<'
+	var symbol_comparator_less_or_equal_than := '<='
+	var symbol_comparator_greater_than := '>'
+	var symbol_comparator_greater_or_equal_than := '>='
 	
 	# Privates
 	var state: States
@@ -360,6 +375,8 @@ class Tokenizer:
 		if tokenize_multiplication_operator() == OK: return OK
 		if tokenize_division_operator() == OK: return OK
 		if tokenize_modulo_operator() == OK: return OK
+		if tokenize_equality_comparator() == OK: return OK
+		if tokenize_inequality_comparator() == OK: return OK
 		if tokenize_not_operator() == OK: return OK
 		return ERR_DOES_NOT_EXIST
 	
@@ -413,6 +430,26 @@ class Tokenizer:
 		add_token(Token.Types.OPERATOR_MODULO, self.symbol_operator_modulo)
 		consume_source(self.symbol_operator_modulo.length())
 		return OK
+	
+	# FIXME: use this more
+	func tokenize_symbol(symbol: String, token_type: Token.Types) -> int:
+		if not self.source_view.begins_with(symbol):
+			return ERR_INVALID_DATA
+		add_token(token_type, symbol)
+		consume_source(symbol.length())
+		return OK
+	
+	func tokenize_equality_comparator() -> int:
+		return tokenize_symbol(
+			self.symbol_comparator_equal,
+			Token.Types.COMPARATOR_EQUAL,
+		)
+	
+	func tokenize_inequality_comparator() -> int:
+		return tokenize_symbol(
+			self.symbol_comparator_inequal,
+			Token.Types.COMPARATOR_INEQUAL,
+		)
 	
 	func tokenize_not_operator() -> int:
 		if self.source_view.read_character_at(0) != not_operator_symbol:
@@ -655,15 +692,6 @@ class NotUnaryOperatorNode:
 class BinaryOperatorNode:
 	extends OperatorNode
 	
-	#@export var operand_left: ExpressionNode
-	#@export var operand_right: ExpressionNode
-	#func with_left(operand: ExpressionNode) -> BinaryOperatorNode:
-		#self.operand_left = operand
-		#return self
-	#func with_right(operand: ExpressionNode) -> BinaryOperatorNode:
-		#self.operand_right = operand
-		#return self
-	
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
 		breakpoint  # you MUST override me !
 		return null
@@ -674,10 +702,6 @@ class BinaryOperatorNode:
 			self.children[0].evaluate(context),
 			self.children[1].evaluate(context),
 		)
-		#return evaluate_binary(
-			#self.operand_left.evaluate(context),
-			#self.operand_right.evaluate(context),
-		#)
 
 
 class AdditionOperatorNode:
@@ -707,7 +731,25 @@ class DivisionOperatorNode:
 class ModuloOperatorNode:
 	extends BinaryOperatorNode
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
-		return left % right
+		if left is int and right is int:
+			return left % right
+		return fmod(left, right)
+
+
+class BinaryComparatorNode:
+	extends BinaryOperatorNode
+
+
+class EqualityComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left == right
+
+
+class InequalityComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left != right
 
 
 class StatementIdentifierNode:
@@ -803,7 +845,7 @@ class VerbatimStatementExtension:
 	#func next() -> Token:
 		#self.cursor += 1
 		#return self.tokens[self.cursor - 1]
-	#func getCurrent() -> Token:
+	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
 
 
@@ -966,8 +1008,25 @@ class Parser:
 		return parse_equality(context)
 
 	func parse_equality(context: ParserContext) -> ExpressionNode:
-		# TODO
-		return parse_comparison(context)
+		var node := parse_comparison(context)
+		while (
+			context.match_type(Token.Types.COMPARATOR_EQUAL) or
+			context.match_type(Token.Types.COMPARATOR_INEQUAL)
+		):
+			match context.get_previous_token().type:
+				Token.Types.COMPARATOR_EQUAL:
+					node = (
+						EqualityComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_equality(context))
+					)
+				Token.Types.COMPARATOR_INEQUAL:
+					node = (
+						InequalityComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_equality(context))
+					)
+		return node
 	
 	func parse_comparison(context: ParserContext) -> ExpressionNode:
 		# TODO
@@ -1045,8 +1104,6 @@ class Parser:
 					node = NegativeUnaryOperatorNode.new()
 				Token.Types.OPERATOR_NOT:
 					node = NotUnaryOperatorNode.new()
-				_:
-					breakpoint
 		
 		if node:
 			node.with_child(parse_primary(context))
