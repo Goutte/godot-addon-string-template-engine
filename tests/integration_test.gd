@@ -255,6 +255,8 @@ func test_a_bunch_of_use_cases() -> void:
 			{{ 1 == 2 }}
 			{{ a == b }}
 			{{ a != b }}
+			{{ 2.0 == 2 }}
+			{{ 2.0 != 2.2 }}
 			""",
 			&'variables': {
 				&'a': 7,
@@ -263,6 +265,26 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': """
 			true
 			false
+			false
+			true
+			true
+			true
+			""",
+		},
+		{
+			&'rule': "Comparison",
+			&'template': """
+			{{ 1 <= 1 }}
+			{{ 1 < 1 }}
+			{{ 1 <= 2 }}
+			{{ 1 >= 2 }}
+			{{ 1 >= 1 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			true
+			false
+			true
 			false
 			true
 			""",

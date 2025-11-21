@@ -377,6 +377,7 @@ class Tokenizer:
 		if tokenize_modulo_operator() == OK: return OK
 		if tokenize_equality_comparator() == OK: return OK
 		if tokenize_inequality_comparator() == OK: return OK
+		if tokenize_comparison_comparator() == OK: return OK
 		if tokenize_not_operator() == OK: return OK
 		return ERR_DOES_NOT_EXIST
 	
@@ -450,6 +451,25 @@ class Tokenizer:
 			self.symbol_comparator_inequal,
 			Token.Types.COMPARATOR_INEQUAL,
 		)
+	
+	func tokenize_comparison_comparator() -> int:
+		if OK == tokenize_symbol(
+			self.symbol_comparator_less_or_equal_than,
+			Token.Types.COMPARATOR_LESS_EQUAL,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_comparator_less_than,
+			Token.Types.COMPARATOR_LESS,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_comparator_greater_or_equal_than,
+			Token.Types.COMPARATOR_GREATER_EQUAL,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_comparator_greater_than,
+			Token.Types.COMPARATOR_GREATER,
+		): return OK
+		return ERR_INVALID_DATA
 	
 	func tokenize_not_operator() -> int:
 		if self.source_view.read_character_at(0) != not_operator_symbol:
@@ -752,6 +772,30 @@ class InequalityComparatorNode:
 		return left != right
 
 
+class LessOrEqualComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left <= right
+
+
+class LessComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left < right
+
+
+class GreaterOrEqualComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left >= right
+
+
+class GreaterComparatorNode:
+	extends BinaryComparatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return left > right
+
+
 class StatementIdentifierNode:
 	extends ExpressionNode
 	@export var identifier: String
@@ -1029,8 +1073,39 @@ class Parser:
 		return node
 	
 	func parse_comparison(context: ParserContext) -> ExpressionNode:
-		# TODO
-		return parse_addition(context)
+		var node := parse_addition(context)
+		while (
+			context.match_type(Token.Types.COMPARATOR_LESS) or
+			context.match_type(Token.Types.COMPARATOR_LESS_EQUAL) or
+			context.match_type(Token.Types.COMPARATOR_GREATER) or
+			context.match_type(Token.Types.COMPARATOR_GREATER_EQUAL)
+		):
+			match context.get_previous_token().type:
+				Token.Types.COMPARATOR_LESS:
+					node = (
+						LessComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_comparison(context))
+					)
+				Token.Types.COMPARATOR_LESS_EQUAL:
+					node = (
+						LessOrEqualComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_comparison(context))
+					)
+				Token.Types.COMPARATOR_GREATER:
+					node = (
+						GreaterComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_comparison(context))
+					)
+				Token.Types.COMPARATOR_GREATER_EQUAL:
+					node = (
+						GreaterOrEqualComparatorNode.new()
+						.with_child(node)
+						.with_child(parse_comparison(context))
+					)
+		return node
 	
 	func parse_addition(context: ParserContext) -> ExpressionNode:
 		var node := parse_multiplication(context)
