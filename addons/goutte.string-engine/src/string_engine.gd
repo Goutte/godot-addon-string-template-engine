@@ -140,7 +140,8 @@ class Tokenizer:
 	const symbol_operator_subtraction := '-'
 	const symbol_operator_multiplication := '*'
 	const symbol_operator_division := '/'
-	const symbol_operator_modulo := '%'
+	const symbol_operator_not := '!'
+	#const symbol_operator_modulo := '%'
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='
 	const symbol_comparator_less_than := '<'
@@ -197,11 +198,8 @@ class Tokenizer:
 		self.variable_identifier_regex = RegEx.new()
 		has_compiled = self.variable_identifier_regex.compile(
 			LINE_START_ANCHOR +
-			# This is just BAD DESIGN
-			#("[^0-9%s][^%s]*" % [self.forbidden_identifier_chars, self.forbidden_identifier_chars])
-			# Safer, but ASCII only
-			"[a-zA-Z_][a-zA-Z0-9_]*"
-			#"[\\w_][\\w0-9_]*"  \w includes numbers  \L is absent
+			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe, but ASCII only
+			#"[\\w_][\\w0-9_]*"  # Nope: \w includes numbers and \L is absent
 		)
 		assert(has_compiled == OK, "Detection of variable identifiers broke.")
 		
@@ -212,19 +210,13 @@ class Tokenizer:
 		)
 		assert(has_compiled == OK, "Numbers must be ßr0k3n")
 		
-		#new Regex(  "^(" +
-		#/*Hex*/ @"0x[0-9a-f]+"  + "|" +
-		#/*Bin*/ @"0b[01]+"      + "|" + 
-		#/*Oct*/ @"0[0-7]*"      + "|" +
-		#/*Dec*/ @"((?!0)|[-+]|(?=0+\.))(\d*\.)?\d+(e\d+)?" + 
-		#")$" );
 		self.float_literal_regex = RegEx.new()
 		has_compiled = self.float_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"(?:" +
-			"\\d+[.]\\d*" +  # 2.0 or 2.
-			"|" +
-			"\\d*[.]\\d+" +  # .2
+			"\\d+\\.\\d*" +  # 2.7 or 2.
+			"|\\.\\d+" +     # .2
+			# TODO: support 1.618e3 and 0xff and 0b101010
 			")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
@@ -258,7 +250,6 @@ class Tokenizer:
 			")"
 		)
 		assert(has_compiled == OK, "Detection regex of %} is broken.")
-	
 	
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
@@ -327,30 +318,21 @@ class Tokenizer:
 			consume_source(whole_match.length())
 
 	func tokenize_echo_closer() -> void:
-		tokenize_closer(self.symbol_echo_closer, Token.Types.ECHO_CLOSER)
+		tokenize_closer(
+			self.symbol_echo_closer,
+			Token.Types.ECHO_CLOSER,
+			self.echo_closer_regex,
+		)
 
 	func tokenize_statement_closer() -> void:
-		tokenize_closer(self.symbol_statement_closer, Token.Types.STATEMENT_CLOSER)
-
-	func tokenize_closer(symbol: String, token_type: Token.Types) -> void:
-		var compiled: int
-		var close_regex := RegEx.new()
-		compiled = close_regex.compile(
-			LINE_START_ANCHOR +
-			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
-			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
-			"|" +
-			")" +
-			"(?<symbol>" +
-			escape_for_regex(symbol) +
-			")"
+		tokenize_closer(
+			self.symbol_statement_closer,
+			Token.Types.STATEMENT_CLOSER,
+			self.statement_closer_regex,
 		)
-		if compiled != OK:
-			breakpoint
-		
-		var close_match := self.source_view.search_with_regex_using_anchors(close_regex)
+
+	func tokenize_closer(symbol: String, token_type: Token.Types, closer_regex: RegEx) -> void:
+		var close_match := self.source_view.search_with_regex_using_anchors(closer_regex)
 		if close_match == null:
 			assert(false, "Expected closer token `%s`, got `%s` instead" % [
 				symbol,
@@ -365,16 +347,16 @@ class Tokenizer:
 			add_token(token_type, whole_match)
 			consume_source(whole_match.length())
 	
-	# FIXME: worst design in the history of designs, hf w/ rtl !
-	var forbidden_identifier_chars := " \\\\/#%?!<>{}()\\[\\]^'\"`|:;,.~+*-"  # MUST end with -
+	# Worst design in the history of designs, hf w/ rtl !
+	#var forbidden_identifier_chars := " \\\\/#%?!<>{}()\\[\\]^'\"`|:;,.~+*-"  # MUST end with -
 	
 	func tokenize_statement_identifier() -> void:
 		var regex_compiled: int
 		var statement_identifier_regex := RegEx.new()
 		regex_compiled = statement_identifier_regex.compile(
-			"^" +
-			("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
-			#"[a-zA-Z_][a-zA-Z0-9_]*"  # safer, ascii-only
+			LINE_START_ANCHOR +
+			#("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
+			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe but ascii-only
 		)
 		if regex_compiled != OK:
 			breakpoint
@@ -422,46 +404,11 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
-	const addition_operator_symbol := '+'  # maximum one rune
-	const subtraction_operator_symbol := '-'  # maximum one rune
-	const multiplication_operator_symbol := '*'  # TODO: support × as well?
-	const division_operator_symbol := '/'  # TODO: support ÷ as well?
-	const not_operator_symbol := '!'  # TODO: support `not` as well?
-	
-	func tokenize_addition_operator() -> int:
-		if self.source_view.read_character_at(0) != addition_operator_symbol:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_ADDITION, addition_operator_symbol)
-		consume_source(1)
-		return OK
-	
-	func tokenize_subtraction_operator() -> int:
-		if self.source_view.read_character_at(0) != subtraction_operator_symbol:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_SUBTRACTION, subtraction_operator_symbol)
-		consume_source(1)
-		return OK
-	
-	func tokenize_multiplication_operator() -> int:
-		if self.source_view.read_character_at(0) != multiplication_operator_symbol:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_MULTIPLICATION, multiplication_operator_symbol)
-		consume_source(1)
-		return OK
-	
-	func tokenize_division_operator() -> int:
-		if self.source_view.read_character_at(0) != division_operator_symbol:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_DIVISION, division_operator_symbol)
-		consume_source(1)
-		return OK
-	
-	func tokenize_modulo_operator() -> int:
-		if self.source_view.read_character_at(0) != self.symbol_operator_modulo:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_MODULO, self.symbol_operator_modulo)
-		consume_source(self.symbol_operator_modulo.length())
-		return OK
+	#const addition_operator_symbol := '+'  # maximum one rune
+	#const subtraction_operator_symbol := '-'  # maximum one rune
+	#const multiplication_operator_symbol := '*'  # TODO: support × as well?
+	#const division_operator_symbol := '/'  # TODO: support ÷ as well?
+	#const not_operator_symbol := '!'  # TODO: support `not` as well?
 	
 	# FIXME: use this more
 	func tokenize_symbol(symbol: String, token_type: Token.Types) -> int:
@@ -469,6 +416,38 @@ class Tokenizer:
 			return ERR_INVALID_DATA
 		add_token(token_type, symbol)
 		consume_source(symbol.length())
+		return OK
+	
+	func tokenize_addition_operator() -> int:
+		return tokenize_symbol(
+			symbol_operator_addition,
+			Token.Types.OPERATOR_ADDITION,
+		)
+	
+	func tokenize_subtraction_operator() -> int:
+		return tokenize_symbol(
+			symbol_operator_subtraction,
+			Token.Types.OPERATOR_SUBTRACTION,
+		)
+	
+	func tokenize_multiplication_operator() -> int:
+		return tokenize_symbol(
+			symbol_operator_multiplication,
+			Token.Types.OPERATOR_MULTIPLICATION,
+		)
+	
+	func tokenize_division_operator() -> int:
+		return tokenize_symbol(
+			symbol_operator_division,
+			Token.Types.OPERATOR_DIVISION,
+		)
+	
+	func tokenize_modulo_operator() -> int:
+		breakpoint  #  FIXME: remove the whole thing
+		if self.source_view.read_character_at(0) != self.symbol_operator_modulo:
+			return ERR_INVALID_DATA
+		add_token(Token.Types.OPERATOR_MODULO, self.symbol_operator_modulo)
+		consume_source(self.symbol_operator_modulo.length())
 		return OK
 	
 	func tokenize_equality_comparator() -> int:
@@ -503,11 +482,10 @@ class Tokenizer:
 		return ERR_INVALID_DATA
 	
 	func tokenize_not_operator() -> int:
-		if self.source_view.read_character_at(0) != not_operator_symbol:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_NOT, not_operator_symbol)
-		consume_source(1)
-		return OK
+		return tokenize_symbol(
+			symbol_operator_not,
+			Token.Types.OPERATOR_NOT,
+		)
 	
 	func tokenize_integer_literal() -> int:
 		var regex_match := self.source_view.search_with_regex_using_anchors(integer_literal_regex)
@@ -896,8 +874,8 @@ class IfElseStatementExtension:
 		parser: Parser,
 		context: ParserContext,
 	) -> StatementNode:
-		
-		# FIXME
+		# We have already parsed the statement opener and identifier.
+		# The rest is up to us, now.
 		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		
@@ -918,8 +896,6 @@ class IfElseStatementExtension:
 			.with_child(then_node)
 		)
 		
-		#parser.parse_expression(context)
-		
 		return if_node
 	
 	func serialize(context: VisitorContext, node: StatementNode) -> String:
@@ -928,7 +904,12 @@ class IfElseStatementExtension:
 		var condition_evaluated := condition.evaluate(context)
 		if condition_evaluated:
 			return then_node.serialize(context)
+		else:
+			if node.children.size() == 3:
+				var else_node := node.children[2] as SyntaxNode
+				return else_node.serialize(context)
 		return ""
+
 
 class VerbatimStatementExtension:
 	extends StatementExtension
@@ -938,7 +919,7 @@ class VerbatimStatementExtension:
 	
 	func parse(
 		identifier_token: Token,
-		arguments_tokens: Array[Token],
+		_arguments_tokens: Array[Token],
 		parser: Parser,
 		context: ParserContext,
 	) -> StatementNode:
@@ -965,13 +946,11 @@ class VerbatimStatementExtension:
 				,
 			""
 		)
-		var content_node := RawDataNode.new().with_data(content)
 		
 		return (
-			StatementNode
-			.new()
+			StatementNode.new()
 			.with_extension(self)
-			.with_child(content_node)
+			.with_child(RawDataNode.new().with_data(content))
 		)
 	
 	func serialize(context: VisitorContext, node: StatementNode) -> String:
@@ -1120,6 +1099,7 @@ class Parser:
 			.with_statement_extensions(statement_extensions)
 		)
 		
+		# TODO: call subparse_until()
 		while context.has_tokens_remaining():
 			var node: SyntaxNode = parse_token(context)
 			body.children.append(node)
@@ -1149,19 +1129,12 @@ class Parser:
 				#echo_tokens.append(context.get_current_token(-1))
 				return EchoNode.new().with_expression(expression).with_tokens(echo_tokens)
 			Token.Types.STATEMENT_OPENER:
-				#var tokens_subset := context.consume_until_type(Token.Types.STATEMENT_CLOSER)
-				#var identifier_token := tokens_subset.pop_front()
-				#var identifier_token := context.consume_type(Token.Types.STATEMENT_IDENTIFIER)
 				var identifier_token := context.consume_current_token()
 				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
 				var statement_extension := context.get_statement_extension(identifier_token.literal)
 				return statement_extension.parse(identifier_token, [], self, context)
-			#Token.Types.VARIABLE_IDENTIFIER:
-				#return VariableIdentifierNode.new().with_identifier(token.literal).with_tokens([token])
-			#Token.Types.STATEMENT_IDENTIFIER:
-				#return StatementIdentifierNode.new().with_identifier(token.literal).with_tokens([token])
 			_:
-				breakpoint  # implement your new token type !
+				breakpoint  # implement your new "main" token type !
 		
 		# Somewhat safe fallback ; should not happen anyway.
 		return RawDataNode.new().with_data("")
