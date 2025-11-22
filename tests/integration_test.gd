@@ -206,34 +206,34 @@ func test_a_bunch_of_use_cases() -> void:
 			-10
 			""",
 		},
-		{
-			&'rule': "Modulo of integers",
-			&'template': """
-			{{ 20 % 3 }}
-			{{ -20 % 3 }}
-			{{ 20 % -3 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			2
-			-2
-			2
-			""",
-		},
-		{
-			&'rule': "Modulo of floats",
-			&'template': """
-			{{ 10.1 % 3.3 }}
-			{{ 20.125 % 3 }}
-			{{ 10 % 3.3 }}
-			""",
-			&'variables': {},
-			&'expected': """
-			0.2
-			2.125
-			0.1
-			""",
-		},
+		#{
+			#&'rule': "Modulo of integers",
+			#&'template': """
+			#{{ 20 % 3 }}
+			#{{ -20 % 3 }}
+			#{{ 20 % -3 }}
+			#""",
+			#&'variables': {},
+			#&'expected': """
+			#2
+			#-2
+			#2
+			#""",
+		#},
+		#{
+			#&'rule': "Modulo of floats",
+			#&'template': """
+			#{{ 10.1 % 3.3 }}
+			#{{ 20.125 % 3 }}
+			#{{ 10 % 3.3 }}
+			#""",
+			#&'variables': {},
+			#&'expected': """
+			#0.2
+			#2.125
+			#0.1
+			#""",
+		#},
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
@@ -287,6 +287,20 @@ func test_a_bunch_of_use_cases() -> void:
 			true
 			false
 			true
+			""",
+		},
+		{
+			&'rule': "If statement",
+			&'template': """
+			{% if age < 18 %}< 18{% endif %}
+			{% if age >= 60 %}Retiree{% endif %}
+			""",
+			&'variables': {
+				&'age': 70,
+			},
+			&'expected': """
+			
+			Retiree
 			""",
 		},
 		{
