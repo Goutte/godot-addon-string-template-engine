@@ -143,7 +143,7 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
-			&'rule': "Arithmetic with Floats",
+			&'rule': "Arithmetic with floats",
 			&'template': """
 			{{ tau + tau }}
 			{{ tau - tau }}
@@ -304,6 +304,47 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
+			&'rule': "If statement (recursive)",
+			&'template': """
+			{% if age > 18 %}
+				You can vote.
+				{% if age > 40 %}
+				You can retire.
+				{% endif %}
+			{% endif %}
+			""",
+			&'variables': {
+				&'age': 70,
+			},
+			&'expected': """
+			
+				You can vote.
+				
+				You can retire.
+				
+			
+			""",
+		},
+		{
+			&'rule': "If Else statement",
+			&'template': """
+			{% if red_to_alpha %}
+				ALPHA = {{ value }};
+			{% else %}
+				ALBEDO.r = {{ value }};
+			{% endif %}
+			""",
+			&'variables': {
+				&'red_to_alpha': true,
+				&'value': 0.62,
+			},
+			&'expected': """
+			
+				ALPHA = 0.62;
+			
+			""",
+		},
+		{
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
@@ -365,3 +406,4 @@ func test_a_bunch_of_use_cases() -> void:
 			datum[&'template'],
 			datum[&'variables'],
 		])
+	print("\tRan %d subtests" % data.size())

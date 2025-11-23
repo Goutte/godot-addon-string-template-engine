@@ -1,12 +1,14 @@
-# Vanilla GDScript "port" of Inja, Twig, Jinja…
-# If you need perfs, try the Ginja addon using a gdextension to wrap Inja.
-# Used to generate shaders, dynamic dialogues, HTML pages…
-
-## A String Template Engine, super slow but flexible.
+## A String Template Engine, slow but flexible.
+## Vanilla GDScript "port wannabe" of Inja, Twig, Jinja…
 class_name StringEngine
 extends RefCounted
 
-## Used statement extensions, you can append your own in here before rendering.
+# WHY: Used to generate shaders, dynamic dialogues, HTML pages…
+# SLOW: try the fast Ginja addon using a gdextension to wrap Inja.
+
+## Statement extensions used by the engine.
+## You can append your own in here before calling render(…).
+## Your best bet is to look at and copy existing extensions.
 var statement_extensions: Array[StatementExtension] = [
 	IfElseStatementExtension.new(),
 	VerbatimStatementExtension.new(),
@@ -32,7 +34,7 @@ class Token:
 		OPERATOR_SUBTRACTION,     ## -
 		OPERATOR_MULTIPLICATION,  ## *
 		OPERATOR_DIVISION,        ## /
-		OPERATOR_MODULO,          ## %  FIXME: remove, use filters instead
+		#OPERATOR_MODULO,          ## %  Removed: conflicts with STATEMENT_CLOSER ; we use filters
 		OPERATOR_NOT,             ## !
 		COMPARATOR_EQUAL,         ## ==
 		COMPARATOR_INEQUAL,       ## !=
@@ -442,14 +444,6 @@ class Tokenizer:
 			Token.Types.OPERATOR_DIVISION,
 		)
 	
-	func tokenize_modulo_operator() -> int:
-		breakpoint  #  FIXME: remove the whole thing
-		if self.source_view.read_character_at(0) != self.symbol_operator_modulo:
-			return ERR_INVALID_DATA
-		add_token(Token.Types.OPERATOR_MODULO, self.symbol_operator_modulo)
-		consume_source(self.symbol_operator_modulo.length())
-		return OK
-	
 	func tokenize_equality_comparator() -> int:
 		return tokenize_symbol(
 			self.symbol_comparator_equal,
@@ -847,10 +841,8 @@ class StatementExtension:
 		return ''
 	
 	func parse(
-		identifier_token: Token,
-		arguments_tokens: Array[Token],
-		parser: Parser,
 		context: ParserContext,
+		identifier_token: Token,
 	) -> StatementNode:
 		breakpoint  # override me !
 		return StatementNode.new().with_extension(self)
@@ -869,25 +861,43 @@ class IfElseStatementExtension:
 		return 'if'
 	
 	func parse(
-		identifier_token: Token,
-		_arguments_tokens: Array[Token],
-		parser: Parser,
 		context: ParserContext,
+		identifier_token: Token,
 	) -> StatementNode:
-		# We have already parsed the statement opener and identifier.
+		# The engine has already parsed the statement opener and identifier.
 		# The rest is up to us, now.
-		var condition := parser.parse_expression(context)
+		# {% if <some_condition> %} … {% else %} … {% end %}
+		var condition := context.parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		
+		var detect_else := context.detect_other_statement('else')
+		var detect_end := context.detect_other_statement('end' + get_statement_identifier())
+		var detect_else_or_end := func(context: ParserContext) -> bool:
+			if detect_else.call(context):
+				return true
+			if detect_end.call(context):
+				return true
+			return false
+		
 		var then_node := SyntaxNode.new()
-		parser.subparse_until(
+		context.parser.subparse_until(
 			context,
 			then_node,
-			context.detect_other_statement('end' + get_statement_identifier()),
+			detect_else_or_end,
 		)
-		context.consume_some_tokens(3)
+		var found_else := detect_else.call(context)
+		context.consume_some_tokens(3)  # luck: else & end have the same shape
 		
-		#var else_node := SyntaxNode.new().with_children([])
+		var else_node: SyntaxNode
+		if found_else:
+			else_node = SyntaxNode.new()
+			context.parser.subparse_until(
+				context,
+				else_node,
+				detect_end,
+			)
+			context.consume_some_tokens(3)
+		
 		var if_node := (
 			StatementNode
 			.new()
@@ -895,6 +905,8 @@ class IfElseStatementExtension:
 			.with_child(condition)
 			.with_child(then_node)
 		)
+		if else_node:
+			if_node.with_child(else_node)
 		
 		return if_node
 	
@@ -918,10 +930,8 @@ class VerbatimStatementExtension:
 		return 'verbatim'
 	
 	func parse(
-		identifier_token: Token,
-		_arguments_tokens: Array[Token],
-		parser: Parser,
 		context: ParserContext,
+		identifier_token: Token,
 	) -> StatementNode:
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		var content_tokens := context.consume_until(
@@ -936,9 +946,10 @@ class VerbatimStatementExtension:
 					context.tokens[token_index+2].type == Token.Types.STATEMENT_CLOSER
 				)
 		)
-		context.consume_current_token()  # {%
-		context.consume_current_token()  # end<statement_identifier>
-		context.consume_current_token()  # %}
+		context.consume_some_tokens(3)  # {% end<statement_identifier> %}
+		#context.consume_current_token()  # {%
+		#context.consume_current_token()  # end<statement_identifier>
+		#context.consume_current_token()  # %}
 		
 		var content := content_tokens.reduce(
 			func(acc: String, tk: Token):
@@ -978,8 +989,13 @@ class VerbatimStatementExtension:
 class ParserContext:
 	extends Resource
 	var statement_extensions: Array[StatementExtension]
+	var parser: Parser
 	var tokens: Array[Token]
 	var current_token_index := 0
+	
+	func with_parser(value: Parser) -> ParserContext:
+		self.parser = value
+		return self
 	
 	func with_tokens(value: Array[Token]) -> ParserContext:
 		self.tokens = value
@@ -1077,8 +1093,7 @@ class ParserContext:
 				return (
 					context.get_current_token(0).type == Token.Types.STATEMENT_OPENER and
 					context.get_current_token(1).type == Token.Types.STATEMENT_IDENTIFIER and
-					context.get_current_token(1).literal == identifier and
-					context.get_current_token(2).type == Token.Types.STATEMENT_CLOSER
+					context.get_current_token(1).literal == identifier
 				)
 		)
 
@@ -1095,6 +1110,7 @@ class Parser:
 		var context := (
 			ParserContext
 			.new()
+			.with_parser(self)
 			.with_tokens(tokens)
 			.with_statement_extensions(statement_extensions)
 		)
@@ -1106,8 +1122,12 @@ class Parser:
 		
 		return tree
 
-	func subparse_until(context: ParserContext, parent: SyntaxNode, end_callable: Callable) -> void:
-		while context.has_tokens_remaining() and not end_callable.call(context):
+	func subparse_until(
+		context: ParserContext,
+		parent: SyntaxNode,
+		done_callable: Callable,
+	) -> void:
+		while context.has_tokens_remaining() and not done_callable.call(context):
 			var node: SyntaxNode = parse_token(context)
 			parent.children.append(node)
 
@@ -1132,7 +1152,7 @@ class Parser:
 				var identifier_token := context.consume_current_token()
 				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
 				var statement_extension := context.get_statement_extension(identifier_token.literal)
-				return statement_extension.parse(identifier_token, [], self, context)
+				return statement_extension.parse(context, identifier_token)
 			_:
 				breakpoint  # implement your new "main" token type !
 		
@@ -1246,7 +1266,7 @@ class Parser:
 		return node
 	
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
-		var node := parse_modulo(context)
+		var node := parse_unary(context)
 		while (
 			context.match_type(Token.Types.OPERATOR_MULTIPLICATION) or
 			context.match_type(Token.Types.OPERATOR_DIVISION)
@@ -1267,15 +1287,15 @@ class Parser:
 		return node
 	
 	# FIXME: use a filter for modulo, not the % symbol
-	func parse_modulo(context: ParserContext) -> ExpressionNode:
-		var node := parse_unary(context)
-		while (context.match_type(Token.Types.OPERATOR_MODULO)):
-			node = (
-				ModuloOperatorNode.new()
-				.with_child(node)
-				.with_child(parse_modulo(context))
-			)
-		return node
+	#func parse_modulo(context: ParserContext) -> ExpressionNode:
+		#var node := parse_unary(context)
+		#while (context.match_type(Token.Types.OPERATOR_MODULO)):
+			#node = (
+				#ModuloOperatorNode.new()
+				#.with_child(node)
+				#.with_child(parse_modulo(context))
+			#)
+		#return node
 	
 	#func parse_filter(context: ParserContext) -> ExpressionNode:
 	
@@ -1356,9 +1376,9 @@ func render(source: String, variables: Dictionary) -> String:
 	var tokenizer := Tokenizer.new()
 	var tokens := tokenizer.tokenize(source)
 	
-	prints("Source:", source)
-	prints("Variables:", variables)
-	prints("Tokens:", tokens)
+	#prints("Source:", source)
+	#prints("Variables:", variables)
+	#prints("Tokens:", tokens)
 	
 	var parser := Parser.new()
 	var syntax_tree := parser.parse(tokens, self.statement_extensions)
