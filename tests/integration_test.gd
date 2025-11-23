@@ -185,6 +185,18 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
+			&'rule': "Grouping using parentheses",
+			&'template': """
+			{{ ((1 + a) * (1 + a)) * 3 + 6 / 3 }}
+			""",
+			&'variables': {
+				&'a': 4,
+			},
+			&'expected': """
+			77
+			""",
+		},
+		{
 			&'rule': "Negative numbers",
 			&'template': """
 			{{ -2 * -5 * -11 }}

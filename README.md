@@ -42,20 +42,27 @@ Features
     - [x] integers and floats
     - [x] arithmetic (+ - * /)
     - [x] comparison (== != < <= > >=)
+    - [ ] composition (and or nand xor)
     - [ ] strings
-    - [ ] parentheses
+    - [x] parentheses
     - [ ] filters
 - [ ] statements
-    - [x] print
+    - [x] print ({{ }})
     - [x] if else
-    - [ ] for
     - [ ] while
+    - [ ] for
     - [ ] set
     - [ ] extends
     - [ ] block
     - [x] verbatim
 - [ ] whitespace handling
+    - [ ] using delimiters ({{- -}} {{~ ~}})
+    - [ ] using engine options
+        - [ ] clear lines of whitespaces due to statements
 - [ ] error handling
+    - [ ] allow a "no assert()" mode
+    - [ ] test error handling
+    - [ ] show where in the template
 - [ ] localization utils
 - [ ] syntax highlighting
 
