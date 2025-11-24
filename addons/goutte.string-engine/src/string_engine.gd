@@ -3,7 +3,7 @@
 class_name StringEngine
 extends RefCounted
 
-# WHY: Used to generate shaders, dynamic dialogues, HTML pages…
+# WHY: Useful to generate shaders, dynamic dialogues, maybe HTML pages…
 # SLOW: try the fast Ginja addon using a gdextension to wrap Inja.
 
 ## Statement extensions used by the engine.
@@ -22,16 +22,22 @@ class Token:
 	enum Types {
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
 		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
+		# FIXME: ECHO → PRINT
 		ECHO_OPENER,              ## {{
 		ECHO_CLOSER,              ## }}
+		# TODO: implement comments
+		COMMENT_OPENER,           ## {#
+		COMMENT_CLOSER,           ## #}
 		STATEMENT_OPENER,         ## {%
 		STATEMENT_CLOSER,         ## %}
-		STATEMENT_IDENTIFIER,     ## Examples: for, if, verbatim…
+		STATEMENT_IDENTIFIER,     ## for, if, else, endif, verbatim…
 		EXPRESSION_GROUP_OPENER,  ## (
 		EXPRESSION_GROUP_CLOSER,  ## )
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
 		LITERAL_INTEGER,          ## 42
 		LITERAL_FLOAT,            ## 1.618
+		LITERAL_BOOLEAN_TRUE,     ## true
+		LITERAL_BOOLEAN_FALSE,    ## false
 		OPERATOR_ADDITION,        ## +
 		OPERATOR_SUBTRACTION,     ## -
 		OPERATOR_MULTIPLICATION,  ## *
@@ -44,6 +50,10 @@ class Token:
 		COMPARATOR_LESS_EQUAL,    ## <=
 		COMPARATOR_GREATER,       ## >
 		COMPARATOR_GREATER_EQUAL, ## >=
+		COMBINATOR_AND,           ## and
+		COMBINATOR_OR,            ## or
+		COMBINATOR_NAND,          ## nand
+		COMBINATOR_XOR,           ## xor
 	}
 	
 	@export var type := Types.UNKNOWN
@@ -69,56 +79,56 @@ class Token:
 ## Not when shrinking though, so it's still worth having this I think.
 class StringView:
 	extends Resource
-	@export var string: String
-	@export var start: int
-	@export var len: int
+	@export_storage var __string: String
+	@export_storage var __start: int
+	@export_storage var __length: int
 	
 	func _init(
-		string := "",  # Provide this, 'tis only optional cause it MUST be IIRC
-		start := -1,   # Defaults to 0
-		len := -1,     # Defaults to the string's length
+		target_string := "",    # Provide this; 'tis only optional cause it MUST be IIRC
+		optional_start := -1,   # Defaults to 0
+		optional_length := -1,  # Defaults to the string's length
 	) -> void:
-		self.string = string
-		if start < 0:
-			start = 0
-		self.start = start
-		if len < 0:
-			len = self.string.length()
-		self.len = len
+		self.__string = target_string
+		if optional_start < 0:
+			optional_start = 0
+		self.__start = optional_start
+		if optional_length < 0:
+			optional_length = self.__string.length()
+		self.__length = optional_length
 		sanitize_delimiters()
 	
 	func _to_string() -> String:
 		return get_as_string()
 	
 	func get_as_string() -> String:
-		return self.string.substr(self.start, self.len)
+		return self.__string.substr(self.__start, self.__length)
 	
 	func length() -> int:
-		return self.len
+		return self.__length
 	
 	func begins_with(prefix: String) -> bool:
-		return prefix == self.string.substr(self.start, prefix.length())
+		return prefix == self.__string.substr(self.__start, prefix.length())
 	
 	func sanitize_delimiters() -> void:
-		self.start = clampi(self.start, 0, self.string.length())
-		self.len = clampi(self.len, 0, self.string.length() - self.start)
+		self.__start = clampi(self.__start, 0, self.__string.length())
+		self.__length = clampi(self.__length, 0, self.__string.length() - self.__start)
 	
-	## Faster but breaks on line anchor metacharacters like ^ and $
+	## Faster but breaks line anchor metacharacters like ^ and $
 	func rsearch(regex: RegEx) -> RegExMatch:
-		return regex.search(self.string, self.start, self.start + self.len)
+		return regex.search(self.__string, self.__start, self.__start + self.__length)
 	
 	## Use this if the regex uses ^ or $
 	func rsearch_start(regex: RegEx) -> RegExMatch:
 		return regex.search(get_as_string())  # slower, but it "Just Works".
 	
 	func shrink_from_start_by(amount: int) -> void:
-		self.start = self.start + amount
-		self.len = self.len - amount
+		self.__start += amount
+		self.__length -= amount
 		sanitize_delimiters()
 	
 	func read_character_at(relative_position: int) -> String:
-		return self.string[
-			clampi(self.start + relative_position, 0, self.string.length()-1)
+		return self.__string[
+			clampi(self.__start+relative_position, 0, self.__string.length()-1)
 		]
 
 
@@ -140,18 +150,24 @@ class Tokenizer:
 	var symbol_echo_closer := '}}'
 	var symbol_statement_opener := '{%'
 	var symbol_statement_closer := '%}'
-	var symbol_group_opener := '('
+	var symbol_group_opener := '('  # 
 	var symbol_group_closer := ')'
+	var symbol_combinator_and := 'and'
+	var symbol_combinator_or := 'or'
+	var symbol_combinator_nand := 'nand'
+	var symbol_combinator_xor := 'xor'
+	var symbol_boolean_true := 'true'
+	var symbol_boolean_false := 'false'
 	
 	# The order we tokenize expressions (if cascade) is hardcoded, right now.
 	# Therefore, the following values are read-only;
-	# perhaps we could make their precedence configurable (at a cost)
+	# perhaps we could make their precedence configurable (at a cost).
 	const symbol_operator_addition := '+'
 	const symbol_operator_subtraction := '-'
 	const symbol_operator_multiplication := '*'
 	const symbol_operator_division := '/'
 	const symbol_operator_not := '!'
-	#const symbol_operator_modulo := '%'
+	#const symbol_operator_modulo := '%'  # this symbol is disabled ; LL(1)
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='
 	const symbol_comparator_less_than := '<'
@@ -224,8 +240,11 @@ class Tokenizer:
 		has_compiled = self.float_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"(?:" +
-			"\\d+\\.\\d*" +  # 2.7 or 2.
-			"|\\.\\d+" +     # .2
+			"\\d+\\.\\d*" +        # 2.7 or 2.
+			"|\\.\\d+" +           # .2
+			"|\\d+\\.\\d*e\\d+" +  # 1.618e3
+			"|\\d*\\.\\d+e\\d+" +  # .333e10
+			"|\\d+e\\d+" +         # 3e9
 			# TODO: support 1.618e3 and 0xff and 0b101010
 			")"
 		)
@@ -384,7 +403,7 @@ class Tokenizer:
 			add_token(Token.Types.STATEMENT_IDENTIFIER, whole_match)
 			consume_source(whole_match.length())
 	
-	func tokenize_expression() -> int:
+	func tokenize_expression() -> Error:
 		var tokenized_at_least_once := ERR_UNAVAILABLE
 		var tokenized := OK
 		while tokenized == OK:
@@ -394,7 +413,10 @@ class Tokenizer:
 			consume_whitespaces_into_previous_token()
 		return tokenized_at_least_once
 		
-	func tokenize_expression_once() -> int:
+	func tokenize_expression_once() -> Error:
+		# Goal: ordered by decreasing usage, yet respecting special precedences
+		# This goal is not yet achieved and will require serious benchmarking
+		if tokenize_boolean_literal() == OK: return OK  # before identifier
 		if tokenize_float_literal() == OK: return OK  # before integer
 		if tokenize_integer_literal() == OK: return OK
 		if tokenize_addition_operator() == OK: return OK
@@ -405,12 +427,13 @@ class Tokenizer:
 		if tokenize_equality_comparator() == OK: return OK
 		if tokenize_inequality_comparator() == OK: return OK  # before not
 		if tokenize_comparison_comparator() == OK: return OK
+		if tokenize_combinator() == OK: return OK  # before identifier
 		if tokenize_not_operator() == OK: return OK
 		if tokenize_group_delimiter() == OK: return OK
 		if tokenize_variable_identifier() == OK: return OK
 		return ERR_DOES_NOT_EXIST
 	
-	func tokenize_variable_identifier() -> int:
+	func tokenize_variable_identifier() -> Error:
 		var regex_match := self.source_view.rsearch_start(variable_identifier_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
@@ -420,69 +443,61 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
-	#const addition_operator_symbol := '+'  # maximum one rune
-	#const subtraction_operator_symbol := '-'  # maximum one rune
-	#const multiplication_operator_symbol := '*'  # TODO: support × as well?
-	#const division_operator_symbol := '/'  # TODO: support ÷ as well?
-	#const not_operator_symbol := '!'  # TODO: support `not` as well?
-	
-	func tokenize_symbol(symbol: String, token_type: Token.Types) -> int:
+	func tokenize_symbol(symbol: String, token_type: Token.Types) -> Error:
 		if not self.source_view.begins_with(symbol):
 			return ERR_INVALID_DATA
 		add_token(token_type, symbol)
 		consume_source(symbol.length())
 		return OK
 	
-	func tokenize_group_delimiter() -> int:
-		if tokenize_symbol(
-			symbol_group_opener,
+	func tokenize_group_delimiter() -> Error:
+		if OK == tokenize_symbol(
+			self.symbol_group_opener,
 			Token.Types.EXPRESSION_GROUP_OPENER,
-		) == OK:
-			return OK
-		if tokenize_symbol(
-			symbol_group_closer,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_group_closer,
 			Token.Types.EXPRESSION_GROUP_CLOSER,
-		) == OK:
-			return OK
+		): return OK
 		return ERR_INVALID_DATA
 	
-	func tokenize_addition_operator() -> int:
+	func tokenize_addition_operator() -> Error:
 		return tokenize_symbol(
-			symbol_operator_addition,
+			self.symbol_operator_addition,
 			Token.Types.OPERATOR_ADDITION,
 		)
 	
-	func tokenize_subtraction_operator() -> int:
+	func tokenize_subtraction_operator() -> Error:
 		return tokenize_symbol(
-			symbol_operator_subtraction,
+			self.symbol_operator_subtraction,
 			Token.Types.OPERATOR_SUBTRACTION,
 		)
 	
-	func tokenize_multiplication_operator() -> int:
+	func tokenize_multiplication_operator() -> Error:
 		return tokenize_symbol(
-			symbol_operator_multiplication,
+			self.symbol_operator_multiplication,
 			Token.Types.OPERATOR_MULTIPLICATION,
 		)
 	
-	func tokenize_division_operator() -> int:
+	func tokenize_division_operator() -> Error:
 		return tokenize_symbol(
-			symbol_operator_division,
+			self.symbol_operator_division,
 			Token.Types.OPERATOR_DIVISION,
 		)
 	
-	func tokenize_equality_comparator() -> int:
+	func tokenize_equality_comparator() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_equal,
 			Token.Types.COMPARATOR_EQUAL,
 		)
 	
-	func tokenize_inequality_comparator() -> int:
+	func tokenize_inequality_comparator() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_inequal,
 			Token.Types.COMPARATOR_INEQUAL,
 		)
 	
-	func tokenize_comparison_comparator() -> int:
+	func tokenize_comparison_comparator() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_comparator_less_or_equal_than,
 			Token.Types.COMPARATOR_LESS_EQUAL,
@@ -501,13 +516,43 @@ class Tokenizer:
 		): return OK
 		return ERR_INVALID_DATA
 	
-	func tokenize_not_operator() -> int:
+	func tokenize_combinator() -> Error:
+		if tokenize_symbol(
+			self.symbol_combinator_and,
+			Token.Types.COMBINATOR_AND,
+		) == OK: return OK
+		if tokenize_symbol(
+			self.symbol_combinator_or,
+			Token.Types.COMBINATOR_OR,
+		) == OK: return OK
+		if tokenize_symbol(
+			self.symbol_combinator_nand,
+			Token.Types.COMBINATOR_NAND,
+		) == OK: return OK
+		if tokenize_symbol(
+			self.symbol_combinator_xor,
+			Token.Types.COMBINATOR_XOR,
+		) == OK: return OK
+		return ERR_INVALID_DATA
+	
+	func tokenize_not_operator() -> Error:
 		return tokenize_symbol(
-			symbol_operator_not,
+			self.symbol_operator_not,
 			Token.Types.OPERATOR_NOT,
 		)
 	
-	func tokenize_integer_literal() -> int:
+	func tokenize_boolean_literal() -> Error:
+		if OK == tokenize_symbol(
+			self.symbol_boolean_true,
+			Token.Types.LITERAL_BOOLEAN_TRUE,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_boolean_false,
+			Token.Types.LITERAL_BOOLEAN_FALSE,
+		): return OK
+		return ERR_INVALID_DATA
+	
+	func tokenize_integer_literal() -> Error:
 		var regex_match := self.source_view.rsearch_start(integer_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
@@ -517,7 +562,7 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
-	func tokenize_float_literal() -> int:
+	func tokenize_float_literal() -> Error:
 		var regex_match := self.source_view.rsearch_start(float_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
@@ -593,7 +638,7 @@ class Tokenizer:
 		)
 
 
-## Main element of our (Abstract) Syntax Tree.
+## Ubiquitous element of our (Abstract) Syntax Tree.
 class SyntaxNode:
 	extends Resource
 	@export var children: Array[SyntaxNode] = []
@@ -603,19 +648,20 @@ class SyntaxNode:
 		self.tokens.append(token)
 		return self
 	
-	func with_tokens(tokens: Array[Token]) -> SyntaxNode:
-		self.tokens.append_array(tokens)
+	func with_tokens(value: Array[Token]) -> SyntaxNode:
+		self.tokens.append_array(value)
 		return self
 	
-	func with_child(child: SyntaxNode) -> SyntaxNode:
-		self.children.append(child)
+	func with_child(value: SyntaxNode) -> SyntaxNode:
+		self.children.append(value)
 		return self
 	
-	func with_children(children: Array[SyntaxNode]) -> SyntaxNode:
-		self.children.append_array(children)
+	func with_children(value: Array[SyntaxNode]) -> SyntaxNode:
+		self.children.append_array(value)
 		return self
 	
-	func evaluate(context: VisitorContext) -> Variant:
+	## You probably want to override this in all expression nodes
+	func evaluate(_context: VisitorContext) -> Variant:
 		return ""
 	
 	func serialize(context: VisitorContext) -> String:
@@ -657,13 +703,13 @@ class BodyNode:
 
 class RawDataNode:
 	extends SyntaxNode
-	@export var data: String = ""
+	@export var data := ""
 	
 	func with_data(value: String) -> RawDataNode:
 		self.data += value
 		return self
 	
-	func serialize_self(context: VisitorContext) -> String:
+	func serialize_self(_context: VisitorContext) -> String:
 		return self.data
 
 
@@ -683,27 +729,39 @@ class VariableIdentifierNode:
 		return context.variables.get(self.identifier, '')
 
 
+class BooleanLiteralNode:
+	extends ExpressionNode
+	@export var value: bool
+
+	func with_value(some_value: bool) -> BooleanLiteralNode:
+		self.value = some_value
+		return self
+
+	func evaluate(_context: VisitorContext) -> Variant:
+		return self.value
+
+
 class IntegerLiteralNode:
 	extends ExpressionNode
 	@export var value: int
-	
-	func with_value(value: int) -> IntegerLiteralNode:
-		self.value = value
+
+	func with_value(some_value: int) -> IntegerLiteralNode:
+		self.value = some_value
 		return self
 
-	func evaluate(context: VisitorContext) -> Variant:
+	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
 
 
 class FloatLiteralNode:
 	extends ExpressionNode
 	@export var value: float
-	
-	func with_value(value: float) -> FloatLiteralNode:
-		self.value = value
+
+	func with_value(some_value: float) -> FloatLiteralNode:
+		self.value = some_value
 		return self
 
-	func evaluate(context: VisitorContext) -> Variant:
+	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
 
 
@@ -715,7 +773,7 @@ class OperatorNode:
 
 class UnaryOperatorNode:
 	extends OperatorNode
-	func evaluate_unary(operand: Variant) -> Variant:
+	func evaluate_unary(_operand: Variant) -> Variant:
 		breakpoint  # you MUST override me !
 		return ""
 	func evaluate(context: VisitorContext) -> Variant:
@@ -746,6 +804,7 @@ class NotUnaryOperatorNode:
 class BinaryOperatorNode:
 	extends OperatorNode
 	
+	@warning_ignore("unused_parameter")
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
 		breakpoint  # you MUST override me !
 		return null
@@ -782,12 +841,13 @@ class DivisionOperatorNode:
 		return left / right
 
 
-class ModuloOperatorNode:
-	extends BinaryOperatorNode
-	func evaluate_binary(left: Variant, right: Variant) -> Variant:
-		if left is int and right is int:
-			return left % right
-		return fmod(left, right)
+# FIXME: remove ?
+#class ModuloOperatorNode:
+	#extends BinaryOperatorNode
+	#func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		#if left is int and right is int:
+			#return left % right
+		#return fmod(left, right)
 
 
 class BinaryComparatorNode:
@@ -830,6 +890,22 @@ class GreaterComparatorNode:
 		return left > right
 
 
+class CombinatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		assert(self.tokens.size() == 1)
+		match self.tokens[0].type:
+			Token.Types.COMBINATOR_AND:
+				return left and right
+			Token.Types.COMBINATOR_OR:
+				return left or right
+			Token.Types.COMBINATOR_NAND:
+				return not (left and right)
+			Token.Types.COMBINATOR_XOR:
+				return bool(left) == bool(right)
+		return null
+
+
 class StatementIdentifierNode:
 	extends ExpressionNode
 	@export var identifier: String
@@ -856,8 +932,8 @@ class StatementNode:
 	extends SyntaxNode
 	#@export var identifier: String
 	@export var extension: StatementExtension
-	func with_extension(extension: StatementExtension) -> StatementNode:
-		self.extension = extension
+	func with_extension(value: StatementExtension) -> StatementNode:
+		self.extension = value
 		return self
 	
 	func serialize(context: VisitorContext) -> String:
@@ -872,14 +948,14 @@ class StatementExtension:
 		return ''
 	
 	func parse(
-		parser: Parser,
-		context: ParserContext,
-		identifier_token: Token,
+		_parser: Parser,
+		_context: ParserContext,
+		_identifier_token: Token,
 	) -> StatementNode:
 		breakpoint  # override me !
 		return StatementNode.new().with_extension(self)
 	
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func serialize(_context: VisitorContext, _node: StatementNode) -> String:
 		return ""  # you probably want to override me
 	
 	func matches_statement_identifier(id_to_match: String) -> bool:
@@ -904,16 +980,16 @@ class IfElseStatementExtension:
 		#var condition := parser.parse_expression()
 		#parser.consume_type(Token.Types.STATEMENT_CLOSER)
 		
-		var condition := context.parser.parse_expression(context)
+		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		
 		var detect_else := context.detect_other_statement('else')
 		var detect_end := context.detect_other_statement('end' + get_statement_identifier())
-		var detect_else_or_end := func(context: ParserContext) -> bool:
-			return detect_else.call(context) or detect_end.call(context)
+		var detect_else_or_end := func(pc: ParserContext) -> bool:
+			return detect_else.call(pc) or detect_end.call(pc)
 		
 		var then_node := SyntaxNode.new()
-		context.parser.parse_tokens_until(
+		parser.parse_tokens_until(
 			context,
 			then_node,
 			detect_else_or_end,
@@ -949,10 +1025,9 @@ class IfElseStatementExtension:
 		var condition_evaluated: Variant = condition.evaluate(context)
 		if condition_evaluated:
 			return then_node.serialize(context)
-		else:
-			if node.children.size() == 3:
-				var else_node := node.children[2] as SyntaxNode
-				return else_node.serialize(context)
+		elif node.children.size() == 3:
+			var else_node := node.children[2] as SyntaxNode
+			return else_node.serialize(context)
 		return ""
 
 
@@ -963,7 +1038,7 @@ class VerbatimStatementExtension:
 		return 'verbatim'
 	
 	func parse(
-		parser: Parser,
+		_parser: Parser,
 		context: ParserContext,
 		identifier_token: Token,
 	) -> StatementNode:
@@ -981,9 +1056,6 @@ class VerbatimStatementExtension:
 				)
 		)
 		context.consume_some_tokens(3)  # {% end<statement_identifier> %}
-		#context.consume_current_token()  # {%
-		#context.consume_current_token()  # end<statement_identifier>
-		#context.consume_current_token()  # %}
 		
 		var content: String = content_tokens.reduce(
 			func(acc: String, tk: Token):
@@ -1183,7 +1255,7 @@ class Parser:
 				return RawDataNode.new().with_data(token.literal).with_token(token)
 			Token.Types.ECHO_OPENER:
 				#var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
-				var tokens_subset: Array[Token] = []
+				#var tokens_subset: Array[Token] = []
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
 					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
@@ -1215,12 +1287,13 @@ class Parser:
 	#
 	# Stratified Grammar for Expressions
 	# ----------------------------------
-	# EXPRESSION = EQUALITY
+	# EXPRESSION = COMBINATION
+	# COMBINATION = EQUALITY ( ( "n"?"and" | "x"?"or" ) EQUALITY )*
 	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )*
 	# COMPARISON = ADDITION ( ( "<=" | "<" | ">=" | ">" ) ADDITION )*
 	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) MULTIPLICATION )*
 	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MODULO )*
-	# MODULO = FILTER ( "%" FILTER )*
+	# MODULO = FILTER ( "%" FILTER )*   → NO: conflicts with %}
 	# FILTER = UNARY ( "|" FILTER_NAME )*
 	# UNARY = ( "+" | "-" | "!" ) UNARY
 	#       | PRIMARY
@@ -1229,8 +1302,28 @@ class Parser:
 	#         | "(" EXPRESSION ")"
 	func parse_expression(context: ParserContext) -> ExpressionNode:
 		assert(context.has_tokens_remaining(), "Expected an expression, but got nothing.")
-		return parse_equality(context)
+		return parse_combination(context)
 
+	func parse_combination(context: ParserContext) -> ExpressionNode:
+		var node := parse_equality(context)
+		while (
+			context.match_type(Token.Types.COMBINATOR_AND) or
+			context.match_type(Token.Types.COMBINATOR_OR) or
+			context.match_type(Token.Types.COMBINATOR_NAND) or
+			context.match_type(Token.Types.COMBINATOR_XOR)
+		):
+			#prints("parser token", context.get_previous_token())
+			#var combinator_token := context.get_previous_token()
+			node = (
+				CombinatorNode.new()
+				#.with_token(combinator_token)
+				.with_child(node)
+				.with_child(parse_combination(context))
+				.with_token(context.get_previous_token())
+				as CombinatorNode
+			)
+		return node
+	
 	func parse_equality(context: ParserContext) -> ExpressionNode:
 		var node := parse_comparison(context)
 		while (
@@ -1383,12 +1476,16 @@ class Parser:
 		match token.type:
 			Token.Types.VARIABLE_IDENTIFIER:
 				return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token) as VariableIdentifierNode
+			Token.Types.LITERAL_BOOLEAN_TRUE:
+				return BooleanLiteralNode.new().with_value(true).with_token(token)
+			Token.Types.LITERAL_BOOLEAN_FALSE:
+				return BooleanLiteralNode.new().with_value(false).with_token(token)
 			Token.Types.LITERAL_INTEGER:
 				return IntegerLiteralNode.new().with_value(int(token.literal)).with_token(token)
 			Token.Types.LITERAL_FLOAT:
 				return FloatLiteralNode.new().with_value(float(token.literal)).with_token(token)
 			_:
-				raise_error("Expected a literal, but got `%s`." % token)
+				raise_error("Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
 	
 	func raise_error(message: String):

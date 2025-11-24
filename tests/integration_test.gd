@@ -302,6 +302,20 @@ func test_a_bunch_of_use_cases() -> void:
 			""",
 		},
 		{
+			&'rule': "Composition",
+			&'template': """
+			{{ true }} {{ false }}
+			{{ true and true }}
+			{{ true and false }}
+			""",
+			&'variables': {},
+			&'expected': """
+			true false
+			true
+			false
+			""",
+		},
+		{
 			&'rule': "If statement",
 			&'template': """
 			{% if age < 18 %}< 18{% endif %}

@@ -36,33 +36,33 @@ Features
 - [x] vanilla gdscript
 - [x] tested
 - [x] extensible
-    - [x] add custom statements
+	- [x] add custom statements
 - [x] variables
 - [x] expressions
-    - [x] integers and floats
-    - [x] arithmetic (+ - * /)
-    - [x] comparison (== != < <= > >=)
-    - [ ] composition (and or nand xor)
-    - [ ] strings
-    - [x] parentheses
-    - [ ] filters
+	- [x] integers and floats
+	- [x] grouping with parentheses
+	- [x] arithmetic (+ - * /)
+	- [x] comparison (== != < <= > >=)
+	- [x] combination (and or nand xor)
+	- [ ] strings
+	- [ ] filters
 - [ ] statements
-    - [x] print ({{ }})
-    - [x] if else
-    - [ ] while
-    - [ ] for
-    - [ ] set
-    - [ ] extends
-    - [ ] block
-    - [x] verbatim
+	- [x] print ({{ }})
+	- [x] if else
+	- [ ] while
+	- [ ] for
+	- [ ] set
+	- [ ] extends
+	- [ ] block
+	- [x] verbatim
 - [ ] whitespace handling
-    - [ ] using delimiters ({{- -}} {{~ ~}})
-    - [ ] using engine options
-        - [ ] clear lines of whitespaces due to statements
+	- [ ] using delimiters ({{- -}} {{~ ~}})
+	- [ ] using engine options
+		- [ ] clear lines of whitespaces due to statements
 - [ ] error handling
-    - [ ] allow a "no assert()" mode
-    - [ ] test error handling
-    - [ ] show where in the template
+	- [ ] allow a "no assert()" mode
+	- [ ] test error handling
+	- [ ] show where in the template
 - [ ] localization utils
 - [ ] syntax highlighting
 
@@ -93,5 +93,3 @@ Please see the [addons' README](./addons/goutte.string-engine/README.md).
 -----
 
 > 🦊 _Feedback and contributions are welcome!_
-
-
