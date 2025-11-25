@@ -218,6 +218,7 @@ func test_a_bunch_of_use_cases() -> void:
 			-10
 			""",
 		},
+		# NOTE: Nah, can't keep LL(1) with the default set of delimiters
 		#{
 			#&'rule': "Modulo of integers",
 			#&'template': """
@@ -315,6 +316,22 @@ func test_a_bunch_of_use_cases() -> void:
 			false
 			""",
 		},
+		
+		{
+			&'rule': "Comments",
+			&'template': """
+			{#################################}
+			A{# nother one #}B{#ites the dust#}!
+			{#################################}
+			""",
+			&'variables': {},
+			&'expected': """
+			
+			AB!
+			
+			""",
+		},
+		
 		{
 			&'rule': "If statement",
 			&'template': """

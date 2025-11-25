@@ -25,12 +25,12 @@ class Token:
 		# FIXME: ECHO → PRINT
 		ECHO_OPENER,              ## {{
 		ECHO_CLOSER,              ## }}
-		# TODO: implement comments
 		COMMENT_OPENER,           ## {#
+		COMMENT_CONTENT,          ## Anything except a comment closer.
 		COMMENT_CLOSER,           ## #}
 		STATEMENT_OPENER,         ## {%
-		STATEMENT_CLOSER,         ## %}
 		STATEMENT_IDENTIFIER,     ## for, if, else, endif, verbatim…
+		STATEMENT_CLOSER,         ## %}
 		EXPRESSION_GROUP_OPENER,  ## (
 		EXPRESSION_GROUP_CLOSER,  ## )
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
@@ -141,6 +141,7 @@ class Tokenizer:
 		RAW_DATA,  ## Reading raw data, the starting/default state
 		ECHO,      ## Reading the expression inside of {{ … }}
 		STATEMENT, ## Reading the statement inside of {% … %}
+		COMMENT,   ## Reading the comment inside of {# … #}
 	}
 	
 	# Public configuration
@@ -150,7 +151,10 @@ class Tokenizer:
 	var symbol_echo_closer := '}}'
 	var symbol_statement_opener := '{%'
 	var symbol_statement_closer := '%}'
-	var symbol_group_opener := '('  # 
+	var symbol_comment_opener := '{#'
+	var symbol_comment_closer := '#}'
+	
+	var symbol_group_opener := '('
 	var symbol_group_closer := ')'
 	var symbol_combinator_and := 'and'
 	var symbol_combinator_or := 'or'
@@ -192,6 +196,7 @@ class Tokenizer:
 	var openers_regex: RegEx
 	var echo_closer_regex: RegEx
 	var statement_closer_regex: RegEx
+	var comment_closer_regex: RegEx
 	var variable_identifier_regex: RegEx
 	var integer_literal_regex: RegEx
 	var float_literal_regex: RegEx
@@ -211,6 +216,8 @@ class Tokenizer:
 			escape_for_regex(self.symbol_echo_opener) +
 			"|" +
 			escape_for_regex(self.symbol_statement_opener) +
+			"|" +
+			escape_for_regex(self.symbol_comment_opener) +
 			")" +
 			"(?<clear_whitespace>" +
 			escape_for_regex(self.symbol_clear_whitespace) +
@@ -280,6 +287,22 @@ class Tokenizer:
 		)
 		assert(has_compiled == OK, "Detection regex of %} is broken.")
 	
+		self.comment_closer_regex = RegEx.new()
+		has_compiled = self.comment_closer_regex.compile(
+			#LINE_START_ANCHOR +
+			"(?<clear_whitespace>" +
+			escape_for_regex(self.symbol_clear_whitespace) +
+			"|" +
+			escape_for_regex(self.symbol_clear_line_whitespace) +
+			"|" +
+			")" +
+			"(?<symbol>" +
+			#"[#][}]" +
+			escape_for_regex(self.symbol_comment_closer) +
+			")"
+		)
+		assert(has_compiled == OK, "Detection regex of %} is broken.")
+	
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
 		reset()
@@ -291,21 +314,29 @@ class Tokenizer:
 				States.RAW_DATA:
 					tokenize_raw_data()
 				States.ECHO:
+					# At this point we have consumed the {{ opener already.
 					consume_whitespaces_into_previous_token()
 					tokenize_expression()
 					consume_whitespaces_into_previous_token()
 					tokenize_echo_closer()
 					set_state(States.RAW_DATA)
 				States.STATEMENT:
+					# At this point we have consumed the {% opener already.
 					consume_whitespaces_into_previous_token()
 					tokenize_statement_identifier()
 					consume_whitespaces_into_previous_token()
 					
-					# FIXME: ask the statement extension on how to tokenize here?
+					# FIXME: ask the statement extension on how to tokenize here
 					tokenize_expression()
 					
 					consume_whitespaces_into_previous_token()
 					tokenize_statement_closer()
+					set_state(States.RAW_DATA)
+				States.COMMENT:
+					# At this point we have consumed the {# opener already.
+					consume_whitespaces_into_previous_token()
+					tokenize_comment_content()
+					tokenize_comment_closer()
 					set_state(States.RAW_DATA)
 				_:
 					breakpoint  # unknown state (implement it!)
@@ -320,7 +351,7 @@ class Tokenizer:
 		var openers_match := self.source_view.rsearch_start(self.openers_regex)
 		
 		var source_remaining := source_view.get_as_string()
-		if openers_match == null:
+		if null == openers_match:
 			add_token(Token.Types.RAW_DATA, source_remaining)
 			consume_source(source_remaining.length())
 		else:
@@ -341,10 +372,30 @@ class Tokenizer:
 				symbol_statement_opener:
 					set_state(States.STATEMENT)
 					add_token(Token.Types.STATEMENT_OPENER, whole_match)
+				symbol_comment_opener:
+					set_state(States.COMMENT)
+					add_token(Token.Types.COMMENT_OPENER, whole_match)
 				_:
 					breakpoint  # implementation is missing, get to work!
 			
+			prints("Tokenizer", "consumed opener", whole_match.length())
 			consume_source(whole_match.length())
+
+	## Advances until it finds a content closer symbol.
+	func tokenize_comment_content() -> void:
+		var closer_match := source_view.rsearch_start(comment_closer_regex)
+		if null == closer_match:
+			raise_error("Expected a %s symbol to close the comment, but found none." % [
+				self.symbol_comment_closer,
+			])
+		else:
+			var match_start := closer_match.get_start()
+			#var closer_symbol := openers_match.get_string(&'symbol')
+			#var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')
+			var source_remaining := source_view.get_as_string()
+			var comment_contents := source_remaining.substr(0, match_start)
+			add_token(Token.Types.COMMENT_CONTENT, comment_contents)
+			consume_source(match_start)
 
 	func tokenize_echo_closer() -> void:
 		tokenize_closer(
@@ -358,6 +409,13 @@ class Tokenizer:
 			self.symbol_statement_closer,
 			Token.Types.STATEMENT_CLOSER,
 			self.statement_closer_regex,
+		)
+
+	func tokenize_comment_closer() -> void:
+		tokenize_closer(
+			self.symbol_comment_closer,
+			Token.Types.COMMENT_CLOSER,
+			self.comment_closer_regex,
 		)
 
 	func tokenize_closer(
@@ -412,7 +470,7 @@ class Tokenizer:
 				tokenized_at_least_once = OK
 			consume_whitespaces_into_previous_token()
 		return tokenized_at_least_once
-		
+	
 	func tokenize_expression_once() -> Error:
 		# Goal: ordered by decreasing usage, yet respecting special precedences
 		# This goal is not yet achieved and will require serious benchmarking
@@ -635,6 +693,7 @@ class Tokenizer:
 			.replace(">", "\\>")
 			.replace(":", "\\:")
 			.replace("|", "\\|")
+			.replace("#", "\\#")
 		)
 
 
@@ -711,6 +770,10 @@ class RawDataNode:
 	
 	func serialize_self(_context: VisitorContext) -> String:
 		return self.data
+
+
+class CommentNode:
+	extends SyntaxNode
 
 
 class ExpressionNode:
@@ -1094,7 +1157,7 @@ class VerbatimStatementExtension:
 
 ## Holds the context of a parser's run.
 ## I thought we'd have to backtrack and therefore copy a context around,
-## but we don't backtrack, and therefore this is somewhat redundant with parser.
+## but we don't backtrack, and therefore this is somewhat redundant with Parser.
 ## Not sure if we'll ever end up backtracking…
 ## This makes the API in statement extensions horrible.  Let's work on it.
 class ParserContext:
@@ -1270,6 +1333,9 @@ class Parser:
 				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
 				var statement_extension := context.get_statement_extension(identifier_token.literal)
 				return statement_extension.parse(self, context, identifier_token)
+			Token.Types.COMMENT_OPENER:
+				context.consume_some_tokens(2)
+				return CommentNode.new()
 			_:
 				breakpoint  # implement your new "main" token type !
 		

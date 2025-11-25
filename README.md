@@ -38,16 +38,17 @@ Features
 - [x] extensible
 	- [x] add custom statements
 - [x] variables
+- [x] comments `{# … #}`
 - [x] expressions
 	- [x] integers and floats
 	- [x] grouping with parentheses
-	- [x] arithmetic (+ - * /)
-	- [x] comparison (== != < <= > >=)
+	- [x] arithmetic `+ - * /`
+	- [x] comparison `== != < <= > >=`
 	- [x] combination (and or nand xor)
 	- [ ] strings
 	- [ ] filters
 - [ ] statements
-	- [x] print ({{ }})
+	- [x] print `{{ … }}`
 	- [x] if else
 	- [ ] while
 	- [ ] for
