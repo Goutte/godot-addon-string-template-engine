@@ -316,7 +316,6 @@ func test_a_bunch_of_use_cases() -> void:
 			false
 			""",
 		},
-		
 		{
 			&'rule': "Comments",
 			&'template': """
@@ -331,7 +330,6 @@ func test_a_bunch_of_use_cases() -> void:
 			
 			""",
 		},
-		
 		{
 			&'rule': "If statement",
 			&'template': """

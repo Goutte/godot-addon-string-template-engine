@@ -474,19 +474,18 @@ class Tokenizer:
 	func tokenize_expression_once() -> Error:
 		# Goal: ordered by decreasing usage, yet respecting special precedences
 		# This goal is not yet achieved and will require serious benchmarking
-		if tokenize_boolean_literal() == OK: return OK  # before identifier
-		if tokenize_float_literal() == OK: return OK  # before integer
-		if tokenize_integer_literal() == OK: return OK
-		if tokenize_addition_operator() == OK: return OK
-		if tokenize_subtraction_operator() == OK: return OK
-		if tokenize_multiplication_operator() == OK: return OK
-		if tokenize_division_operator() == OK: return OK
-		#if tokenize_modulo_operator() == OK: return OK
-		if tokenize_equality_comparator() == OK: return OK
-		if tokenize_inequality_comparator() == OK: return OK  # before not
-		if tokenize_comparison_comparator() == OK: return OK
+		if tokenize_literal_boolean() == OK: return OK  # before identifier
+		if tokenize_literal_float() == OK: return OK  # before integer
+		if tokenize_literal_integer() == OK: return OK
+		if tokenize_operator_addition() == OK: return OK
+		if tokenize_operator_subtraction() == OK: return OK
+		if tokenize_operator_multiplication() == OK: return OK
+		if tokenize_operator_division() == OK: return OK
+		if tokenize_comparator_equality() == OK: return OK
+		if tokenize_comparator_inequality() == OK: return OK  # before not
+		if tokenize_comparator_comparison() == OK: return OK
 		if tokenize_combinator() == OK: return OK  # before identifier
-		if tokenize_not_operator() == OK: return OK
+		if tokenize_operator_not() == OK: return OK
 		if tokenize_group_delimiter() == OK: return OK
 		if tokenize_variable_identifier() == OK: return OK
 		return ERR_DOES_NOT_EXIST
@@ -519,43 +518,43 @@ class Tokenizer:
 		): return OK
 		return ERR_INVALID_DATA
 	
-	func tokenize_addition_operator() -> Error:
+	func tokenize_operator_addition() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_addition,
 			Token.Types.OPERATOR_ADDITION,
 		)
 	
-	func tokenize_subtraction_operator() -> Error:
+	func tokenize_operator_subtraction() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_subtraction,
 			Token.Types.OPERATOR_SUBTRACTION,
 		)
 	
-	func tokenize_multiplication_operator() -> Error:
+	func tokenize_operator_multiplication() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_multiplication,
 			Token.Types.OPERATOR_MULTIPLICATION,
 		)
 	
-	func tokenize_division_operator() -> Error:
+	func tokenize_operator_division() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_division,
 			Token.Types.OPERATOR_DIVISION,
 		)
 	
-	func tokenize_equality_comparator() -> Error:
+	func tokenize_comparator_equality() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_equal,
 			Token.Types.COMPARATOR_EQUAL,
 		)
 	
-	func tokenize_inequality_comparator() -> Error:
+	func tokenize_comparator_inequality() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_inequal,
 			Token.Types.COMPARATOR_INEQUAL,
 		)
 	
-	func tokenize_comparison_comparator() -> Error:
+	func tokenize_comparator_comparison() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_comparator_less_or_equal_than,
 			Token.Types.COMPARATOR_LESS_EQUAL,
@@ -593,13 +592,13 @@ class Tokenizer:
 		) == OK: return OK
 		return ERR_INVALID_DATA
 	
-	func tokenize_not_operator() -> Error:
+	func tokenize_operator_not() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_not,
 			Token.Types.OPERATOR_NOT,
 		)
 	
-	func tokenize_boolean_literal() -> Error:
+	func tokenize_literal_boolean() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_boolean_true,
 			Token.Types.LITERAL_BOOLEAN_TRUE,
@@ -610,7 +609,7 @@ class Tokenizer:
 		): return OK
 		return ERR_INVALID_DATA
 	
-	func tokenize_integer_literal() -> Error:
+	func tokenize_literal_integer() -> Error:
 		var regex_match := self.source_view.rsearch_start(integer_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
@@ -620,7 +619,7 @@ class Tokenizer:
 		consume_source(whole_match.length())
 		return OK
 	
-	func tokenize_float_literal() -> Error:
+	func tokenize_literal_float() -> Error:
 		var regex_match := self.source_view.rsearch_start(float_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
