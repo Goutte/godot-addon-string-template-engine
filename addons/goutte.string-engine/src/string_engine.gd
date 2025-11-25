@@ -34,10 +34,11 @@ class Token:
 		EXPRESSION_GROUP_OPENER,  ## (
 		EXPRESSION_GROUP_CLOSER,  ## )
 		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
-		LITERAL_INTEGER,          ## 42
-		LITERAL_FLOAT,            ## 1.618
 		LITERAL_BOOLEAN_TRUE,     ## true
 		LITERAL_BOOLEAN_FALSE,    ## false
+		LITERAL_INTEGER,          ## 42
+		LITERAL_FLOAT,            ## 1.618
+		LITERAL_STRING,           ## "Hello world !"
 		OPERATOR_ADDITION,        ## +
 		OPERATOR_SUBTRACTION,     ## -
 		OPERATOR_MULTIPLICATION,  ## *
@@ -73,20 +74,20 @@ class Token:
 		return self.literal
 
 
-## A basic (and quite ineffective) view on a string.
-## The goal is/was to copy less strings.
+## A basic (and quite inefficient) view on a portion of a string.
+## The goal was/is to copy less strings.
 ## But regex search using offset ignores line anchors like ^, so we copy anyway.
 ## Not when shrinking though, so it's still worth having this I think.
 class StringView:
 	extends Resource
-	@export_storage var __string: String
+	@export_storage var __string: String  # immutable whole string
 	@export_storage var __start: int
 	@export_storage var __length: int
 	
 	func _init(
-		target_string := "",    # Provide this; 'tis only optional cause it MUST be IIRC
-		optional_start := -1,   # Defaults to 0
-		optional_length := -1,  # Defaults to the string's length
+		target_string := "",    ## Provide this; optional cause it MUST be IIRC
+		optional_start := -1,   ## Defaults to 0
+		optional_length := -1,  ## Defaults to the string's length
 	) -> void:
 		self.__string = target_string
 		if optional_start < 0:
@@ -178,6 +179,7 @@ class Tokenizer:
 	const symbol_comparator_less_or_equal_than := '<='
 	const symbol_comparator_greater_than := '>'
 	const symbol_comparator_greater_or_equal_than := '>='
+	const symbol_string_delimiter := '"'  # single rune, CANNOT be backslash
 	
 	# Privates
 	var state: States
@@ -193,13 +195,15 @@ class Tokenizer:
 		source_view = null
 		reset_regexes()
 	
+	var variable_identifier_regex: RegEx
+	var statement_identifier_regex: RegEx
+	var integer_literal_regex: RegEx
+	var float_literal_regex: RegEx
+	var string_literal_regex: RegEx
 	var openers_regex: RegEx
 	var echo_closer_regex: RegEx
 	var statement_closer_regex: RegEx
 	var comment_closer_regex: RegEx
-	var variable_identifier_regex: RegEx
-	var integer_literal_regex: RegEx
-	var float_literal_regex: RegEx
 	
 	# Line start anchor breaks with regex's search offset, yet we use a StringView.
 	# We might want to get rid of it and switch to solution B ; depends on the benchmarks.
@@ -236,6 +240,18 @@ class Tokenizer:
 			"|\\d+e\\d+" +         # 3e9
 			# TODO: support 1.618e3 and 0xff and 0b101010
 			")"
+		)
+		assert(has_compiled == OK, "Never trust an IEEE754")
+		
+		self.string_literal_regex = RegEx.new()
+		has_compiled = self.string_literal_regex.compile(
+			LINE_START_ANCHOR +
+			("%s" % escape_for_regex(self.symbol_string_delimiter)) +
+			#"(?:" +
+			("(?:[^\\\\%s]|\\\\.)*" % escape_for_regex(self.symbol_string_delimiter)) +
+			#("(?:[^%s\\\\]|\\\\[\\s\\S])*" % self.symbol_string_delimiter) +
+			#")" +
+			("%s" % escape_for_regex(self.symbol_string_delimiter))
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
 		
@@ -342,17 +358,20 @@ class Tokenizer:
 		# With the default configuration, OPENERs are `{{`, `{%` and `{#`.
 		
 		var openers_match := self.source_view.rsearch_start(self.openers_regex)
+		var source_remaining := self.source_view.get_as_string()
 		
-		var source_remaining := source_view.get_as_string()
 		if null == openers_match:
+			# No opener found, we can consume as raw data 'til the end
 			add_token(Token.Types.RAW_DATA, source_remaining)
 			consume_source(source_remaining.length())
 		else:
 			var match_start := openers_match.get_start()
-			var raw_data_contents := source_remaining.substr(0, match_start)
 			
-			add_token(Token.Types.RAW_DATA, raw_data_contents)
-			consume_source(match_start)
+			if match_start > 0:
+				# Let's consume any raw data
+				var raw_data_contents := source_remaining.substr(0, match_start)
+				add_token(Token.Types.RAW_DATA, raw_data_contents)
+				consume_source(match_start)
 			
 			var whole_match := openers_match.get_string()
 			var opener_symbol := openers_match.get_string(&'symbol')
@@ -360,16 +379,16 @@ class Tokenizer:
 			
 			match opener_symbol:
 				symbol_echo_opener:
-					set_state(States.ECHO)
 					add_token(Token.Types.ECHO_OPENER, whole_match)
+					set_state(States.ECHO)
 				symbol_statement_opener:
-					set_state(States.STATEMENT)
 					add_token(Token.Types.STATEMENT_OPENER, whole_match)
+					set_state(States.STATEMENT)
 				symbol_comment_opener:
-					set_state(States.COMMENT)
 					add_token(Token.Types.COMMENT_OPENER, whole_match)
+					set_state(States.COMMENT)
 				_:
-					breakpoint  # implementation is missing, get to work!
+					breakpoint  # implementation is missing; git to werk!
 			
 			consume_source(whole_match.length())
 
@@ -431,16 +450,12 @@ class Tokenizer:
 			add_token(token_type, whole_match)
 			consume_source(whole_match.length())
 	
-	# Worst design in the history of designs, hf w/ rtl !
-	#var forbidden_identifier_chars := " \\\\/#%?!<>{}()\\[\\]^'\"`|:;,.~+*-"  # MUST end with -
-	
 	func tokenize_statement_identifier() -> void:
 		var regex_compiled: int
 		var statement_identifier_regex := RegEx.new()
 		regex_compiled = statement_identifier_regex.compile(
 			LINE_START_ANCHOR +
-			#("[^0-9%s][^%s]*" % [forbidden_identifier_chars, forbidden_identifier_chars])
-			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe but ascii-only
+			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe but ascii-only  (t.t)
 		)
 		if regex_compiled != OK:
 			breakpoint
@@ -469,6 +484,7 @@ class Tokenizer:
 		if tokenize_literal_boolean() == OK: return OK  # before identifier
 		if tokenize_literal_float() == OK: return OK  # before integer
 		if tokenize_literal_integer() == OK: return OK
+		if tokenize_literal_string() == OK: return OK
 		if tokenize_operator_addition() == OK: return OK
 		if tokenize_operator_subtraction() == OK: return OK
 		if tokenize_operator_multiplication() == OK: return OK
@@ -618,6 +634,16 @@ class Tokenizer:
 		
 		var whole_match := regex_match.get_string()
 		add_token(Token.Types.LITERAL_FLOAT, whole_match)
+		consume_source(whole_match.length())
+		return OK
+	
+	func tokenize_literal_string() -> Error:
+		var regex_match := self.source_view.rsearch_start(string_literal_regex)
+		if regex_match == null:
+			return ERR_INVALID_DATA
+		
+		var whole_match := regex_match.get_string()
+		add_token(Token.Types.LITERAL_STRING, whole_match)
 		consume_source(whole_match.length())
 		return OK
 	
@@ -811,9 +837,42 @@ class FloatLiteralNode:
 	extends ExpressionNode
 	@export var value: float
 
+	static func from_token(token: Token) -> FloatLiteralNode:
+		assert(token.type == Token.Types.LITERAL_FLOAT)
+		assert(token.literal.length() >= 2)
+		var node := FloatLiteralNode.new()
+		node.value = float(token.literal)
+		node.tokens.append(token)
+		assert(str(node.value) == token.literal, "%s != %s" % [
+			str(node.value), token.literal,
+		])
+		return node
+	
 	func with_value(some_value: float) -> FloatLiteralNode:
 		self.value = some_value
 		return self
+
+	func evaluate(_context: VisitorContext) -> Variant:
+		return self.value
+
+
+class StringLiteralNode:
+	extends ExpressionNode
+	@export var value: String
+	
+	static func from_token(token: Token) -> StringLiteralNode:
+		assert(token.type == Token.Types.LITERAL_STRING)
+		assert(token.literal.length() >= 2)
+		var node := StringLiteralNode.new()
+		node.value = token.literal.substr(1, token.literal.length() - 2)
+		node.value = node.value.replace("\\\"", "\"")
+		node.value = node.value.replace("\\\\", "\\")
+		node.tokens.append(token)
+		return node
+
+	#func with_value(some_value: String) -> StringLiteralNode:
+		#self.value = some_value
+		#return self
 
 	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
@@ -893,15 +952,6 @@ class DivisionOperatorNode:
 	extends BinaryOperatorNode
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
 		return left / right
-
-
-# FIXME: remove ?
-#class ModuloOperatorNode:
-	#extends BinaryOperatorNode
-	#func evaluate_binary(left: Variant, right: Variant) -> Variant:
-		#if left is int and right is int:
-			#return left % right
-		#return fmod(left, right)
 
 
 class BinaryComparatorNode:
@@ -1540,7 +1590,11 @@ class Parser:
 			Token.Types.LITERAL_INTEGER:
 				return IntegerLiteralNode.new().with_value(int(token.literal)).with_token(token)
 			Token.Types.LITERAL_FLOAT:
-				return FloatLiteralNode.new().with_value(float(token.literal)).with_token(token)
+				#return FloatLiteralNode.new().with_value(float(token.literal)).with_token(token)
+				return FloatLiteralNode.from_token(token)
+			Token.Types.LITERAL_STRING:
+				return StringLiteralNode.from_token(token)
+				#return StringLiteralNode.new().with_value(token.literal.substr(1, token.literal.length()-2)).with_token(token)
 			_:
 				raise_error("Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()

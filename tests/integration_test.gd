@@ -1,6 +1,6 @@
 extends AbstractTest
 
-func test_a_bunch_of_use_cases() -> void:
+func test_a_bunch_of_rules() -> void:
 	var data := [
 		{
 			&'rule': "Empty template yields empty string",
@@ -23,7 +23,7 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Bonjour !",
 		},
 		{
-			&'rule': "Echo a variable",
+			&'rule': "Print a variable with {{ … }}",
 			&'template': "Hello {{ name }}!",
 			&'variables': {
 				&'name': 'Godette',
@@ -31,7 +31,7 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Hello Godette!",
 		},
 		{
-			&'rule': "Echo a variable (whitespaces are optional)",
+			&'rule': "Whitespaces inside are optional",
 			&'template': "Hello {{name}}!",
 			&'variables': {
 				&'name': 'Goutte',
@@ -39,21 +39,22 @@ func test_a_bunch_of_use_cases() -> void:
 			&'expected': "Hello Goutte!",
 		},
 		{
-			&'rule': "Echo a variable (whitespaces are conflatable)",
-			&'template': "Hello {{   name  		  }}!",
+			&'rule': "Whitespaces inside are conflatable",
+			&'template': "Hello {{   name  	\n	  }}!",
 			&'variables': {
 				&'name': 'there',
 			},
 			&'expected': "Hello there!",
 		},
 		{
-			&'rule': "Echo two variables",
-			&'template': "Hello {{ surname }} {{ name }}!",
+			&'rule': "Accept unicode runes are values",
+			&'template': "Hello {{ surname }} {{ name }}{{ emote }}!",
 			&'variables': {
-				&'surname': "Godot's",
-				&'name': "Community",
+				&'surname': "🤖 Godot's",
+				&'name': "Community ♥",
+				&'emote': "♥",
 			},
-			&'expected': "Hello Godot's Community!",
+			&'expected': "Hello 🤖 Godot's Community ♥♥!",
 		},
 		{
 			&'rule': "Accept multiline templates",
@@ -90,20 +91,102 @@ func test_a_bunch_of_use_cases() -> void:
 			# NOTE: Use {% verbatim %} … {% endverbatim %} instead of escape sequances
 			&'rule': "Backslashes do NOT escape instructions",
 			&'template': """
-			C:\\{{ folder }}\\{{ filename }}
+			use \\{{namespace}}\\{{class}};
 			""",
 			&'variables': {
-				&'folder': "system32",
-				&'filename': "ms32.exe",
+				&'namespace': "Addons",
+				&'class': "StringEngine",
 			},
 			&'expected': """
-			C:\\system32\\ms32.exe
+			use \\Addons\\StringEngine;
+			""",
+		},
+		{
+			&'rule': "Integers",
+			&'template': """
+			0{{ 11 }}0
+			0{{ 011 }}0
+			0{{ 0 }}0
+			""",
+			&'variables': {},
+			&'expected': """
+			0110
+			0110
+			000
+			""",
+		},
+		{
+			&'rule': "Floats",
+			&'template': """
+			{{ 1.618 }}
+			1.0 / phi == {{ 1.0 / phi }}
+			      phi == {{ phi }}
+			phi * phi == {{ phi * phi }}
+			phi * phi == phi + 1   is   {{ phi * phi == phi + 1 }}
+			""",
+			&'variables': {
+				&'phi': (1.0 + sqrt(5.0)) * 0.5,
+			},
+			&'expected': """
+			1.618
+			1.0 / phi == 0.61803398874989
+			      phi == 1.61803398874989
+			phi * phi == 2.61803398874989
+			phi * phi == phi + 1   is   true
+			""",
+		},
+		{
+			&'rule': "Strings",
+			&'template': """
+			{{ "" }}{{ "." }}{{ "" }}
+			{{ "{{" }} "🦋" {{ "}}" }} yields {{ "🦋" }}
+			{{ "Sphinx of Black Quartz, Judge my Vow" }}
+			{{ "The ship" }} "Espoir"
+			{{ "The ship \\"Espoir\\"" }}
+			""",
+			&'variables': {
+				&'name': "Pierre",
+			},
+			&'expected': """
+			.
+			{{ "🦋" }} yields 🦋
+			Sphinx of Black Quartz, Judge my Vow
+			The ship "Espoir"
+			The ship "Espoir"
+			""",
+		},
+		{
+			&'rule': "String escape sequence is \\",
+			&'template': """
+			{{ "\\"" }}
+			{{ "\\\\" }}
+			{{ "\\\\" }}{{ "\\"" }}
+			{{ "\\\\\\"" }}
+			{{ "\\"\\\\" }}
+			""",
+			&'variables': {},
+			&'expected': """
+			"
+			\\
+			\\"
+			\\"
+			"\\
+			""",
+		},
+		{
+			&'rule': "Naughty Strings",
+			&'template': """
+			TODO
+			""",
+			&'variables': {},
+			&'expected': """
+			TODO
 			""",
 		},
 		{
 			&'rule': "Addition of integers",
 			&'template': """
-			Current: {{ current }}
+			Current: {{ 0 + current }}
 			Next: {{ current + 1 }}
 			""",
 			&'variables': {
@@ -124,22 +207,6 @@ func test_a_bunch_of_use_cases() -> void:
 			},
 			&'expected': """
 			86
-			""",
-		},
-		{
-			&'rule': "Floats",
-			&'template': """
-			{{ 1.618 }}
-			{{ tau }}
-			{{ tau * tau }}
-			""",
-			&'variables': {
-				&'tau': TAU,
-			},
-			&'expected': """
-			1.618
-			6.28318530717959
-			39.4784176043574
 			""",
 		},
 		{
@@ -247,6 +314,27 @@ func test_a_bunch_of_use_cases() -> void:
 			#0.1
 			#""",
 		#},
+		{
+			&'rule': "Multiline arithmetic",
+			&'template': """
+			{{
+				(
+					(1 + a)
+					*
+					(1 + a)
+				)
+				*
+				3
+				+ 6 / 3
+			}}
+			""",
+			&'variables': {
+				&'a': 19,
+			},
+			&'expected': """
+			1202
+			""",
+		},
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
