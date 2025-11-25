@@ -36,7 +36,9 @@ Features
 - [x] vanilla gdscript
 - [x] tested
 - [x] extensible
+	- [x] customize some symbols
 	- [x] add custom statements
+	- [ ] add custom filters
 - [x] variables
 - [x] comments `{# … #}`
 - [x] expressions
@@ -44,7 +46,7 @@ Features
 	- [x] grouping with parentheses
 	- [x] arithmetic `+ - * /`
 	- [x] comparison `== != < <= > >=`
-	- [x] combination (and or nand xor)
+	- [x] combination `and or nand xor`
 	- [ ] strings
 	- [ ] filters
 - [ ] statements

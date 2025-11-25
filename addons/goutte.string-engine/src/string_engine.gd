@@ -210,24 +210,6 @@ class Tokenizer:
 	func reset_regexes():
 		var has_compiled: int
 		
-		self.openers_regex = RegEx.new()
-		has_compiled = self.openers_regex.compile(
-			"(?<symbol>" +
-			escape_for_regex(self.symbol_echo_opener) +
-			"|" +
-			escape_for_regex(self.symbol_statement_opener) +
-			"|" +
-			escape_for_regex(self.symbol_comment_opener) +
-			")" +
-			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
-			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
-			"|" +
-			")"
-		)
-		assert(has_compiled == OK, "Did you change some symbols, perhaps?")
-		
 		self.variable_identifier_regex = RegEx.new()
 		has_compiled = self.variable_identifier_regex.compile(
 			LINE_START_ANCHOR +
@@ -257,51 +239,62 @@ class Tokenizer:
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
 		
-		self.echo_closer_regex = RegEx.new()
-		has_compiled = self.echo_closer_regex.compile(
-			LINE_START_ANCHOR +
+		self.openers_regex = RegEx.new()
+		has_compiled = self.openers_regex.compile(
+			"(?<symbol>" +
+			escape_for_regex(self.symbol_echo_opener) +
+			"|" +
+			escape_for_regex(self.symbol_statement_opener) +
+			"|" +
+			escape_for_regex(self.symbol_comment_opener) +
+			")" +
 			"(?<clear_whitespace>" +
 			escape_for_regex(self.symbol_clear_whitespace) +
 			"|" +
 			escape_for_regex(self.symbol_clear_line_whitespace) +
 			"|" +
-			")" +
-			"(?<symbol>" +
-			escape_for_regex(self.symbol_echo_closer) +
 			")"
+		)
+		assert(has_compiled == OK, "Did you change some symbols, perhaps?")
+		
+		var compile_closer_regex: Callable = \
+		func(
+			regex: RegEx,
+			symbol: String,
+			use_start_anchor := true,
+		) -> Error:
+			return regex.compile(
+				(LINE_START_ANCHOR if use_start_anchor else "") +
+				"(?<clear_whitespace>" +
+				escape_for_regex(self.symbol_clear_whitespace) +
+				"|" +
+				escape_for_regex(self.symbol_clear_line_whitespace) +
+				"|" +
+				")" +
+				"(?<symbol>" + escape_for_regex(symbol) + ")"
+			)
+		
+		self.echo_closer_regex = RegEx.new()
+		has_compiled = compile_closer_regex.call(
+			self.echo_closer_regex,
+			self.symbol_echo_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of }} is broken.")
 	
 		self.statement_closer_regex = RegEx.new()
-		has_compiled = self.statement_closer_regex.compile(
-			LINE_START_ANCHOR +
-			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
-			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
-			"|" +
-			")" +
-			"(?<symbol>" +
-			escape_for_regex(self.symbol_statement_closer) +
-			")"
+		has_compiled = compile_closer_regex.call(
+			self.statement_closer_regex,
+			self.symbol_statement_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of %} is broken.")
 	
 		self.comment_closer_regex = RegEx.new()
-		has_compiled = self.comment_closer_regex.compile(
-			#LINE_START_ANCHOR +
-			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
-			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
-			"|" +
-			")" +
-			"(?<symbol>" +
-			#"[#][}]" +
-			escape_for_regex(self.symbol_comment_closer) +
-			")"
+		has_compiled = compile_closer_regex.call(
+			self.comment_closer_regex,
+			self.symbol_comment_closer,
+			false,
 		)
-		assert(has_compiled == OK, "Detection regex of %} is broken.")
+		assert(has_compiled == OK, "Detection regex of #} is broken.")
 	
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
@@ -378,7 +371,6 @@ class Tokenizer:
 				_:
 					breakpoint  # implementation is missing, get to work!
 			
-			prints("Tokenizer", "consumed opener", whole_match.length())
 			consume_source(whole_match.length())
 
 	## Advances until it finds a content closer symbol.
@@ -390,8 +382,8 @@ class Tokenizer:
 			])
 		else:
 			var match_start := closer_match.get_start()
-			#var closer_symbol := openers_match.get_string(&'symbol')
-			#var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')
+			#var closer_symbol := closer_match.get_string(&'symbol')
+			#var clear_whitespace_symbol := closer_match.get_string(&'clear_whitespace')
 			var source_remaining := source_view.get_as_string()
 			var comment_contents := source_remaining.substr(0, match_start)
 			add_token(Token.Types.COMMENT_CONTENT, comment_contents)
