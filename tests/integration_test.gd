@@ -405,6 +405,28 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
+			&'rule': "Filters",
+			&'template': """
+			{{ "yoLo" | uppercase }}
+			{{ "YoLo" | upper }}
+			{{ "YoLo" | lowercase }}
+			{{ "YoLo" | lower }}
+			{{ "YoLo" | lower | upper }}
+			{{"YoLo"|upper|lower}}
+			{{ "ÆÛŒÉÈÇÀ" | lower }}
+			""",
+			&'variables': {},
+			&'expected': """
+			YOLO
+			YOLO
+			yolo
+			yolo
+			YOLO
+			yolo
+			æûœéèçà
+			""",
+		},
+		{
 			&'rule': "Comments",
 			&'template': """
 			{#################################}

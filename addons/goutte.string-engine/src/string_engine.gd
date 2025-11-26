@@ -14,6 +14,16 @@ var statement_extensions: Array[StatementExtension] = [
 	VerbatimStatementExtension.new(),
 ]
 
+## Filter extensions used by the engine.
+## You can append your own in here before calling render(…).
+## Your best bet is to look at and copy existing extensions.
+var filter_extensions: Array[FilterExtension] = [
+	LowerFilterExtension.new(),
+	LowercaseFilterExtension.new(),
+	UpperFilterExtension.new(),
+	UppercaseFilterExtension.new(),
+]
+
 
 ## A basic (and quite inefficient) view on a portion of a string.
 ## The goal was/is to copy less strings.
@@ -25,7 +35,7 @@ class StringView:
 	@export_storage var __string: String  # immutable whole string
 	@export_storage var __start: int
 	@export_storage var __length: int
-	
+
 	func _init(
 		target_string := "",    ## Provide this; optional cause it MUST be IIRC
 		optional_start := -1,   ## Defaults to 0
@@ -39,36 +49,36 @@ class StringView:
 			optional_length = self.__string.length()
 		self.__length = optional_length
 		sanitize_delimiters()
-	
+
 	func _to_string() -> String:
 		return get_as_string()
-	
+
 	func get_as_string() -> String:
 		return __string.substr(__start, __length)
-	
+
 	func length() -> int:
 		return __length
-	
+
 	func begins_with(prefix: String) -> bool:
 		return prefix == __string.substr(__start, prefix.length())
-	
+
 	func sanitize_delimiters() -> void:
 		self.__start = clampi(__start, 0, __string.length())
 		self.__length = clampi(__length, 0, __string.length() - __start)
-	
+
 	## Faster but breaks line anchor metacharacters like ^ and $
 	func rsearch(regex: RegEx) -> RegExMatch:
 		return regex.search(__string, __start, __start + __length)
-	
+
 	## Use this if the regex uses ^ or $
 	func rsearch_start(regex: RegEx) -> RegExMatch:
 		return regex.search(get_as_string())  # slower, but it "Just Works".
-	
+
 	func shrink_from_start_by(amount: int) -> void:
 		self.__start += amount
 		self.__length -= amount
 		sanitize_delimiters()
-	
+
 	func read_character_at(relative_position: int) -> String:
 		return __string[
 			clampi(__start + relative_position, 0, __string.length() - 1)
@@ -92,11 +102,15 @@ class Token:
 		COMMENT_CONTENT,          ## Anything except a comment closer.
 		COMMENT_CLOSER,           ## #}
 		STATEMENT_OPENER,         ## {%
-		STATEMENT_IDENTIFIER,     ## for, if, else, endif, verbatim…
+		STATEMENT_IDENTIFIER,     ## for, if, else, endif, verbatim, etc.
 		STATEMENT_CLOSER,         ## %}
 		EXPRESSION_GROUP_OPENER,  ## (
 		EXPRESSION_GROUP_CLOSER,  ## )
-		VARIABLE_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
+		EXPRESSIONS_SEPARATOR,    ## ,
+		FILTER,                   ## |
+		#FILTER_IDENTIFIER,        ## uppercase, etc.
+		# FIXME: rename to LITERAL_IDENTIFIER
+		LITERAL_IDENTIFIER,      ## The Token only knows the name of the variable, not its value.
 		LITERAL_BOOLEAN_TRUE,     ## true
 		LITERAL_BOOLEAN_FALSE,    ## false
 		LITERAL_INTEGER,          ## 42
@@ -119,20 +133,20 @@ class Token:
 		COMBINATOR_NAND,          ## nand
 		COMBINATOR_XOR,           ## xor
 	}
-	
+
 	@export var type := Types.UNKNOWN
 	@export var literal := ""
 	@export var whitespaces_before := ""
 	@export var whitespaces_after := ""
-	
+
 	func with_type(value: Types) -> Token:
 		self.type = value
 		return self
-	
+
 	func with_literal(value: String) -> Token:
 		self.literal = value
 		return self
-	
+
 	func _to_string() -> String:
 		return self.literal
 
@@ -148,7 +162,7 @@ class Tokenizer:
 		STATEMENT, ## Reading the statement inside of {% … %}
 		COMMENT,   ## Reading the comment inside of {# … #}
 	}
-	
+
 	# Public configuration
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
@@ -158,7 +172,8 @@ class Tokenizer:
 	var symbol_statement_closer := '%}'
 	var symbol_comment_opener := '{#'
 	var symbol_comment_closer := '#}'
-	
+
+	var symbol_filter := '|'
 	var symbol_group_opener := '('
 	var symbol_group_closer := ')'
 	var symbol_combinator_and := 'and'
@@ -167,7 +182,7 @@ class Tokenizer:
 	var symbol_combinator_xor := 'xor'
 	var symbol_boolean_true := 'true'
 	var symbol_boolean_false := 'false'
-	
+
 	# The order we tokenize expressions (if cascade) is hardcoded, right now.
 	# Therefore, the following values are read-only;
 	# perhaps we could make their precedence configurable (at a cost).
@@ -184,13 +199,14 @@ class Tokenizer:
 	const symbol_comparator_greater_than := '>'
 	const symbol_comparator_greater_or_equal_than := '>='
 	const symbol_string_delimiter := '"'  # single rune, CANNOT be backslash
-	
+	const symbol_group_separator := ','
+
 	# Privates
 	var state: States
 	var tokens: Array[Token]  # Perhaps use a TokenStream class? (halfway there)
 	var source: String  # Immutable whole source, we work on a view of it
 	var source_view: StringView  # Our view on the source template.
-	
+
 	# @protected
 	func reset():
 		state = States.RAW_DATA
@@ -198,9 +214,9 @@ class Tokenizer:
 		source = ""
 		source_view = null
 		reset_regexes()
-	
-	var variable_identifier_regex: RegEx
-	var statement_identifier_regex: RegEx
+
+	var literal_identifier_regex: RegEx
+	#var statement_identifier_regex: RegEx
 	var integer_literal_regex: RegEx
 	var float_literal_regex: RegEx
 	var string_literal_regex: RegEx
@@ -208,31 +224,31 @@ class Tokenizer:
 	var echo_closer_regex: RegEx
 	var statement_closer_regex: RegEx
 	var comment_closer_regex: RegEx
-	
+
 	# Line start anchor breaks with regex's search offset, yet we use a StringView.
 	# We might want to get rid of it and switch to solution B ; depends on the benchmarks.
 	# A: keep it, keep searching on a substr (copy!) of source on each token (we're doing it)
 	# B: remove it, use the search offset, hope regex is fast (feels like it'll scale worse)
 	const LINE_START_ANCHOR := "^"
-	
+
 	func reset_regexes():
 		var has_compiled: int
-		
-		self.variable_identifier_regex = RegEx.new()
-		has_compiled = self.variable_identifier_regex.compile(
+
+		self.literal_identifier_regex = RegEx.new()
+		has_compiled = self.literal_identifier_regex.compile(
 			LINE_START_ANCHOR +
 			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe, but ASCII only
 			#"[\\w_][\\w0-9_]*"  # Nope: \w includes numbers and \L is absent
 		)
 		assert(has_compiled == OK, "Detection of variable identifiers broke.")
-		
+
 		self.integer_literal_regex = RegEx.new()
 		has_compiled = self.integer_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"[0-9]+"
 		)
 		assert(has_compiled == OK, "Numbers must be ßr0k3n")
-		
+
 		self.float_literal_regex = RegEx.new()
 		has_compiled = self.float_literal_regex.compile(
 			LINE_START_ANCHOR +
@@ -246,19 +262,18 @@ class Tokenizer:
 			")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
-		
+
 		self.string_literal_regex = RegEx.new()
+		var quote := escape_for_regex(self.symbol_string_delimiter)
 		has_compiled = self.string_literal_regex.compile(
 			LINE_START_ANCHOR +
-			("%s" % escape_for_regex(self.symbol_string_delimiter)) +
-			#"(?:" +
-			("(?:[^\\\\%s]|\\\\.)*" % escape_for_regex(self.symbol_string_delimiter)) +
-			#("(?:[^%s\\\\]|\\\\[\\s\\S])*" % self.symbol_string_delimiter) +
-			#")" +
-			("%s" % escape_for_regex(self.symbol_string_delimiter))
+			("%s" % quote) +
+			("(?:[^\\\\%s]|\\\\[\\s\\S])*" % quote) +
+			#("(?:[^\\\\%s]|\\\\.)*" % quote) +
+			("%s" % quote)
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
-		
+
 		self.openers_regex = RegEx.new()
 		has_compiled = self.openers_regex.compile(
 			"(?<symbol>" +
@@ -276,7 +291,7 @@ class Tokenizer:
 			")"
 		)
 		assert(has_compiled == OK, "Did you change some symbols, perhaps?")
-		
+
 		var compile_closer_regex: Callable = \
 		func(
 			regex: RegEx,
@@ -293,21 +308,21 @@ class Tokenizer:
 				")" +
 				"(?<symbol>" + escape_for_regex(symbol) + ")"
 			)
-		
+
 		self.echo_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.echo_closer_regex,
 			self.symbol_echo_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of }} is broken.")
-	
+
 		self.statement_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.statement_closer_regex,
 			self.symbol_statement_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of %} is broken.")
-	
+
 		self.comment_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.comment_closer_regex,
@@ -315,13 +330,13 @@ class Tokenizer:
 			false,
 		)
 		assert(has_compiled == OK, "Detection regex of #} is broken.")
-	
+
 	## The main job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
 		reset()
 		self.source = template
 		self.source_view = StringView.new(template, 0, template.length())
-		
+
 		while self.source_view.length() > 0:
 			match self.state:
 				States.RAW_DATA:
@@ -338,10 +353,10 @@ class Tokenizer:
 					consume_whitespaces_into_previous_token()
 					tokenize_statement_identifier()
 					consume_whitespaces_into_previous_token()
-					
+
 					# FIXME: ask the statement extension on how to tokenize here
 					tokenize_expression()
-					
+
 					consume_whitespaces_into_previous_token()
 					tokenize_statement_closer()
 					set_state(States.RAW_DATA)
@@ -353,34 +368,34 @@ class Tokenizer:
 					set_state(States.RAW_DATA)
 				_:
 					breakpoint  # unknown state (implement it!)
-		
+
 		return self.tokens
-	
+
 	func tokenize_raw_data() -> void:
 		# There is no way to discriminate raw data by itself.
 		# We're going to advance to the first found OPENER of our syntax.
 		# With the default configuration, OPENERs are `{{`, `{%` and `{#`.
-		
+
 		var openers_match := self.source_view.rsearch_start(self.openers_regex)
 		var source_remaining := self.source_view.get_as_string()
-		
+
 		if null == openers_match:
 			# No opener found, we can consume as raw data 'til the end
 			add_token(Token.Types.RAW_DATA, source_remaining)
 			consume_source(source_remaining.length())
 		else:
+			# Let's consume any potential raw data before the opener
 			var match_start := openers_match.get_start()
-			
 			if match_start > 0:
-				# Let's consume any raw data
 				var raw_data_contents := source_remaining.substr(0, match_start)
 				add_token(Token.Types.RAW_DATA, raw_data_contents)
 				consume_source(match_start)
-			
+
+			# And finally we can consume the opener
 			var whole_match := openers_match.get_string()
 			var opener_symbol := openers_match.get_string(&'symbol')
 			var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')  # TODO
-			
+
 			match opener_symbol:
 				symbol_echo_opener:
 					add_token(Token.Types.ECHO_OPENER, whole_match)
@@ -393,7 +408,7 @@ class Tokenizer:
 					set_state(States.COMMENT)
 				_:
 					breakpoint  # implementation is missing; git to werk!
-			
+
 			consume_source(whole_match.length())
 
 	## Advances until it finds a content closer symbol.
@@ -442,7 +457,7 @@ class Tokenizer:
 		if close_match == null:
 			raise_error("Expected closer token `%s`, got `%s` instead." % [
 				symbol,
-				self.source_view.read_character_at(0) + 
+				self.source_view.read_character_at(0) +
 				self.source_view.read_character_at(1)
 			])
 			consume_source(self.source_view.length())  # l∞p prevention
@@ -453,25 +468,25 @@ class Tokenizer:
 			var clear_whitespace_symbol := close_match.get_string(&'clear_whitespace')
 			add_token(token_type, whole_match)
 			consume_source(whole_match.length())
-	
+
 	func tokenize_statement_identifier() -> void:
-		var regex_compiled: int
-		var statement_identifier_regex := RegEx.new()
-		regex_compiled = statement_identifier_regex.compile(
-			LINE_START_ANCHOR +
-			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe but ascii-only  (t.t)
-		)
-		if regex_compiled != OK:
-			breakpoint
-		
-		var regex_match := self.source_view.rsearch_start(statement_identifier_regex)
+		#var regex_compiled: int
+		#var statement_identifier_regex := RegEx.new()
+		#regex_compiled = statement_identifier_regex.compile(
+			#LINE_START_ANCHOR +
+			#"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe but ascii-only  (t.t)
+		#)
+		#if regex_compiled != OK:
+			#breakpoint
+
+		var regex_match := self.source_view.rsearch_start(literal_identifier_regex)
 		if regex_match == null:
 			assert(false, "Not a statement identifier")
 		else:
 			var whole_match := regex_match.get_string()
 			add_token(Token.Types.STATEMENT_IDENTIFIER, whole_match)
 			consume_source(whole_match.length())
-	
+
 	func tokenize_expression() -> Error:
 		var tokenized_at_least_once := ERR_UNAVAILABLE
 		var tokenized := OK
@@ -481,7 +496,7 @@ class Tokenizer:
 				tokenized_at_least_once = OK
 			consume_whitespaces_into_previous_token()
 		return tokenized_at_least_once
-	
+
 	func tokenize_expression_once() -> Error:
 		# Goal: ordered by decreasing usage, yet respecting special precedences
 		# This goal is not yet achieved and will require serious benchmarking
@@ -499,26 +514,44 @@ class Tokenizer:
 		if tokenize_combinator() == OK: return OK  # before identifier
 		if tokenize_operator_not() == OK: return OK
 		if tokenize_group_delimiter() == OK: return OK
-		if tokenize_variable_identifier() == OK: return OK
+		if tokenize_expressions_separator() == OK: return OK
+		if tokenize_filter() == OK: return OK
+		#if tokenize_function_call() == OK: return OK
+		if tokenize_literal_identifier() == OK: return OK
 		return ERR_DOES_NOT_EXIST
-	
-	func tokenize_variable_identifier() -> Error:
-		var regex_match := self.source_view.rsearch_start(variable_identifier_regex)
+
+	#func tokenize_function_call() -> Error:
+		#return ERR_INVALID_DATA
+
+	func tokenize_expressions_separator() -> Error:
+		return tokenize_symbol(
+			self.symbol_group_separator,
+			Token.Types.EXPRESSIONS_SEPARATOR,
+		)
+
+	func tokenize_literal_identifier() -> Error:
+		var regex_match := self.source_view.rsearch_start(literal_identifier_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
-		
+
 		var whole_match := regex_match.get_string()
-		add_token(Token.Types.VARIABLE_IDENTIFIER, whole_match)
+		add_token(Token.Types.LITERAL_IDENTIFIER, whole_match)
 		consume_source(whole_match.length())
 		return OK
-	
+
 	func tokenize_symbol(symbol: String, token_type: Token.Types) -> Error:
 		if not self.source_view.begins_with(symbol):
 			return ERR_INVALID_DATA
 		add_token(token_type, symbol)
 		consume_source(symbol.length())
 		return OK
-	
+
+	func tokenize_filter() -> Error:
+		return tokenize_symbol(
+			self.symbol_filter,
+			Token.Types.FILTER,
+		)
+
 	func tokenize_group_delimiter() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_group_opener,
@@ -529,43 +562,43 @@ class Tokenizer:
 			Token.Types.EXPRESSION_GROUP_CLOSER,
 		): return OK
 		return ERR_INVALID_DATA
-	
+
 	func tokenize_operator_addition() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_addition,
 			Token.Types.OPERATOR_ADDITION,
 		)
-	
+
 	func tokenize_operator_subtraction() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_subtraction,
 			Token.Types.OPERATOR_SUBTRACTION,
 		)
-	
+
 	func tokenize_operator_multiplication() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_multiplication,
 			Token.Types.OPERATOR_MULTIPLICATION,
 		)
-	
+
 	func tokenize_operator_division() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_division,
 			Token.Types.OPERATOR_DIVISION,
 		)
-	
+
 	func tokenize_comparator_equality() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_equal,
 			Token.Types.COMPARATOR_EQUAL,
 		)
-	
+
 	func tokenize_comparator_inequality() -> Error:
 		return tokenize_symbol(
 			self.symbol_comparator_inequal,
 			Token.Types.COMPARATOR_INEQUAL,
 		)
-	
+
 	func tokenize_comparator_comparison() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_comparator_less_or_equal_than,
@@ -584,7 +617,7 @@ class Tokenizer:
 			Token.Types.COMPARATOR_GREATER,
 		): return OK
 		return ERR_INVALID_DATA
-	
+
 	func tokenize_combinator() -> Error:
 		if tokenize_symbol(
 			self.symbol_combinator_and,
@@ -603,13 +636,13 @@ class Tokenizer:
 			Token.Types.COMBINATOR_XOR,
 		) == OK: return OK
 		return ERR_INVALID_DATA
-	
+
 	func tokenize_operator_not() -> Error:
 		return tokenize_symbol(
 			self.symbol_operator_not,
 			Token.Types.OPERATOR_NOT,
 		)
-	
+
 	func tokenize_literal_boolean() -> Error:
 		if OK == tokenize_symbol(
 			self.symbol_boolean_true,
@@ -620,48 +653,48 @@ class Tokenizer:
 			Token.Types.LITERAL_BOOLEAN_FALSE,
 		): return OK
 		return ERR_INVALID_DATA
-	
+
 	func tokenize_literal_integer() -> Error:
 		var regex_match := self.source_view.rsearch_start(integer_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
-		
+
 		var whole_match := regex_match.get_string()
 		add_token(Token.Types.LITERAL_INTEGER, whole_match)
 		consume_source(whole_match.length())
 		return OK
-	
+
 	func tokenize_literal_float() -> Error:
 		var regex_match := self.source_view.rsearch_start(float_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
-		
+
 		var whole_match := regex_match.get_string()
 		add_token(Token.Types.LITERAL_FLOAT, whole_match)
 		consume_source(whole_match.length())
 		return OK
-	
+
 	func tokenize_literal_string() -> Error:
 		var regex_match := self.source_view.rsearch_start(string_literal_regex)
 		if regex_match == null:
 			return ERR_INVALID_DATA
-		
+
 		var whole_match := regex_match.get_string()
 		add_token(Token.Types.LITERAL_STRING, whole_match)
 		consume_source(whole_match.length())
 		return OK
-	
+
 	func set_state(value: States) -> void:
 		self.state = value
-	
+
 	func add_token(type: Token.Types, literal: String) -> void:
 		self.tokens.append(Token.new().with_type(type).with_literal(literal))
-	
+
 	func consume_whitespaces_into_previous_token() -> void:
 		assert(not self.tokens.is_empty())
 		var consumed_whitespaces := consume_whitespaces()
 		self.tokens[-1].whitespaces_after += consumed_whitespaces
-		
+
 	func consume_whitespaces() -> String:
 		var regex_compiled: int
 		var whitespaces_regex := RegEx.new()
@@ -671,14 +704,14 @@ class Tokenizer:
 		if regex_compiled != OK:
 			breakpoint  # regex broke ; dev intrigued
 			return ""
-		
+
 		var whitespaces_match := self.source_view.rsearch_start(whitespaces_regex)
 		if whitespaces_match != null:
 			consume_source(whitespaces_match.get_string().length())
 			return whitespaces_match.get_string()
-		
+
 		return ""
-	
+
 	func consume_source(amount: int) -> void:
 		assert(amount >= 0, "Cannot consume a source negatively. … For now.")
 		if amount < 0:
@@ -686,13 +719,13 @@ class Tokenizer:
 		if amount == 0:  # just to see if/when that happens, remove me at will
 			breakpoint
 			return
-		
+
 		self.source_view.shrink_from_start_by(amount)
-	
+
 	func raise_error(message: String) -> void:
 		printerr(message)
 		assert(false, message)
-	
+
 	# No RegEx.escape() support yet, see https://github.com/godotengine/godot-proposals/issues/7995
 	func escape_for_regex(input: String) -> String:
 		return (
@@ -727,33 +760,33 @@ class SyntaxNode:
 	extends Resource
 	@export var children: Array[SyntaxNode] = []
 	@export var tokens: Array[Token] = []
-	
+
 	func with_token(token: Token) -> SyntaxNode:
 		self.tokens.append(token)
 		return self
-	
+
 	func with_tokens(value: Array[Token]) -> SyntaxNode:
 		self.tokens.append_array(value)
 		return self
-	
+
 	func with_child(value: SyntaxNode) -> SyntaxNode:
 		self.children.append(value)
 		return self
-	
+
 	func with_children(value: Array[SyntaxNode]) -> SyntaxNode:
 		self.children.append_array(value)
 		return self
-	
+
 	## You probably want to override this in all expression nodes
 	func evaluate(_context: VisitorContext) -> Variant:
 		return ""
-	
+
 	func serialize(context: VisitorContext) -> String:
 		return serialize_self(context) + serialize_children(context)
-	
+
 	func serialize_self(context: VisitorContext) -> String:
 		return str(evaluate(context))
-	
+
 	func serialize_children(context: VisitorContext) -> String:
 		#return self.children.reduce(
 			#func(accu: String, child: SyntaxNode): return accu + child.serialize(context),
@@ -771,10 +804,10 @@ class SyntaxNode:
 class SyntaxTree:
 	extends SyntaxNode
 	@export var body: BodyNode
-	
+
 	func serialize(context: VisitorContext) -> String:
 		return self.body.serialize(context)
-	
+
 	func with_body(value: BodyNode) -> SyntaxTree:
 		self.body = value
 		self.children.append(value)
@@ -788,11 +821,11 @@ class BodyNode:
 class RawDataNode:
 	extends SyntaxNode
 	@export var data := ""
-	
+
 	func with_data(value: String) -> RawDataNode:
 		self.data += value
 		return self
-	
+
 	func serialize_self(_context: VisitorContext) -> String:
 		return self.data
 
@@ -805,13 +838,20 @@ class ExpressionNode:
 	extends SyntaxNode
 
 
+class ExpressionsNode:
+	extends SyntaxNode
+
+
 class VariableIdentifierNode:
 	extends ExpressionNode
 	@export var identifier: String
-	
-	func with_identifier(value: String) -> VariableIdentifierNode:
-		self.identifier = value
-		return self
+
+	static func from_token(token: Token) -> VariableIdentifierNode:
+		assert(token.type == Token.Types.LITERAL_IDENTIFIER)
+		var node := VariableIdentifierNode.new()
+		node.identifier = token.literal
+		node.tokens.append(token)
+		return node
 
 	func evaluate(context: VisitorContext) -> Variant:
 		return context.variables.get(self.identifier, '')
@@ -820,7 +860,7 @@ class VariableIdentifierNode:
 class BooleanLiteralNode:
 	extends ExpressionNode
 	@export var value: bool
-	
+
 	static func from_token(token: Token, truth: bool) -> BooleanLiteralNode:
 		assert(
 			token.type == Token.Types.LITERAL_BOOLEAN_TRUE or
@@ -873,7 +913,7 @@ class FloatLiteralNode:
 			#str(node.value), token.literal,
 		#])
 		return node
-	
+
 	func with_value(some_value: float) -> FloatLiteralNode:
 		self.value = some_value
 		return self
@@ -885,7 +925,7 @@ class FloatLiteralNode:
 class StringLiteralNode:
 	extends ExpressionNode
 	@export var value: String
-	
+
 	static func from_token(token: Token) -> StringLiteralNode:
 		assert(token.type == Token.Types.LITERAL_STRING)
 		assert(token.literal.length() >= 2)
@@ -906,6 +946,7 @@ class OperatorNode:
 		return serialize_self(context)
 
 
+@abstract
 class UnaryOperatorNode:
 	extends OperatorNode
 	func evaluate_unary(_operand: Variant) -> Variant:
@@ -936,14 +977,15 @@ class NotUnaryOperatorNode:
 		return !operand
 
 
+@abstract
 class BinaryOperatorNode:
 	extends OperatorNode
-	
+
 	@warning_ignore("unused_parameter")
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
 		breakpoint  # you MUST override me !
 		return null
-	
+
 	func evaluate(context: VisitorContext) -> Variant:
 		assert(self.children.size() == 2)
 		return evaluate_binary(
@@ -976,6 +1018,7 @@ class DivisionOperatorNode:
 		return left / right
 
 
+@abstract
 class BinaryComparatorNode:
 	extends BinaryOperatorNode
 
@@ -1029,16 +1072,37 @@ class CombinatorNode:
 				return not (left and right)
 			Token.Types.COMBINATOR_XOR:
 				return bool(left) == bool(right)
-		return null
+		breakpoint
+		return ""
 
 
-class StatementIdentifierNode:
+class FilterNode:
 	extends ExpressionNode
-	@export var identifier: String
-	
-	func with_identifier(value: String) -> StatementIdentifierNode:
-		self.identifier = value
+	@export var extension: FilterExtension
+	@export var subject: ExpressionNode
+
+	func with_extension(value: FilterExtension) -> FilterNode:
+		self.extension = value
 		return self
+
+	func with_subject(value: ExpressionNode) -> FilterNode:
+		self.subject = value
+		self.children.push_front(value)
+		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		return self.extension.evaluate(context, self)
+
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
+#class StatementIdentifierNode:  # unused
+	#extends ExpressionNode
+	#@export var identifier: String
+	#func with_identifier(value: String) -> StatementIdentifierNode:
+		#self.identifier = value
+		#return self
 
 
 class EchoNode:
@@ -1056,14 +1120,76 @@ class EchoNode:
 
 class StatementNode:
 	extends SyntaxNode
-	#@export var identifier: String
 	@export var extension: StatementExtension
+
 	func with_extension(value: StatementExtension) -> StatementNode:
 		self.extension = value
 		return self
-	
+
 	func serialize(context: VisitorContext) -> String:
 		return self.extension.serialize(context, self)
+
+#endregion
+
+
+#region Filter Extensions
+
+## Write your own filters by extending and implementing this abstract class.
+@abstract
+class FilterExtension:
+	extends Resource
+
+	## Used mostly for documentation purposes.
+	func get_identifier() -> String:
+		breakpoint  # override me !
+		return ''
+
+	## Apply the logic of the filter to the node's evaluated subject and return.
+	@warning_ignore("unused_parameter")
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		breakpoint  # override me !
+		return ""
+
+	## Used to find the appropriate filter extension from the filter identifier.
+	func matches_identifier(id_to_match: String) -> bool:
+		return id_to_match == get_identifier()
+
+
+## Converts the subject to uppercase.
+class UppercaseFilterExtension:
+	extends FilterExtension
+
+	func get_identifier() -> String:
+		return 'uppercase'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		return str(node.subject.evaluate(context)).to_upper()
+
+
+## Short alias for "uppercase"
+class UpperFilterExtension:
+	extends UppercaseFilterExtension
+	func get_identifier() -> String:
+		return 'upper'
+
+
+## Converts the subject to lowercase.
+class LowercaseFilterExtension:
+	extends FilterExtension
+
+	func get_identifier() -> String:
+		return 'lowercase'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		return str(node.subject.evaluate(context)).to_lower()
+
+
+## Short alias for "lowercase"
+class LowerFilterExtension:
+	extends LowercaseFilterExtension
+	func get_identifier() -> String:
+		return 'lower'
+
 #endregion
 
 
@@ -1071,11 +1197,11 @@ class StatementNode:
 
 class StatementExtension:
 	extends Resource
-	
-	func get_statement_identifier() -> String:
+
+	func get_identifier() -> String:
 		breakpoint  # override me !
 		return ''
-	
+
 	func parse(
 		_parser: Parser,
 		_context: ParserContext,
@@ -1083,20 +1209,20 @@ class StatementExtension:
 	) -> StatementNode:
 		breakpoint  # override me !
 		return StatementNode.new().with_extension(self)
-	
+
 	func serialize(_context: VisitorContext, _node: StatementNode) -> String:
 		return ""  # you probably want to override me
-	
-	func matches_statement_identifier(id_to_match: String) -> bool:
-		return id_to_match == get_statement_identifier()
+
+	func matches_identifier(id_to_match: String) -> bool:
+		return id_to_match == get_identifier()
 
 
 class IfElseStatementExtension:
 	extends StatementExtension
-	
-	func get_statement_identifier() -> String:
+
+	func get_identifier() -> String:
 		return 'if'
-	
+
 	func parse(
 		parser: Parser,
 		context: ParserContext,
@@ -1105,18 +1231,15 @@ class IfElseStatementExtension:
 		# The engine has already parsed the statement opener and identifier.
 		# The rest is up to us, now.
 		# {% if <some_condition> %} … {% else %} … {% end %}
-		
-		#var condition := parser.parse_expression()
-		#parser.consume_type(Token.Types.STATEMENT_CLOSER)
-		
+
 		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
-		
+
 		var detect_else := context.detect_other_statement('else')
-		var detect_end := context.detect_other_statement('end' + get_statement_identifier())
+		var detect_end := context.detect_other_statement('end' + get_identifier())
 		var detect_else_or_end := func(pc: ParserContext) -> bool:
 			return detect_else.call(pc) or detect_end.call(pc)
-		
+
 		var then_node := SyntaxNode.new()
 		parser.parse_tokens_until(
 			context,
@@ -1125,7 +1248,7 @@ class IfElseStatementExtension:
 		)
 		var found_else := detect_else.call(context) as bool
 		context.consume_some_tokens(3)  # luck: else & end have the same shape
-		
+
 		var else_node: SyntaxNode
 		if found_else:
 			else_node = SyntaxNode.new()
@@ -1135,7 +1258,7 @@ class IfElseStatementExtension:
 				detect_end,
 			)
 			context.consume_some_tokens(3)
-		
+
 		var if_node := (
 			StatementNode
 			.new()
@@ -1145,9 +1268,9 @@ class IfElseStatementExtension:
 		)
 		if else_node:
 			if_node.with_child(else_node)
-		
+
 		return if_node
-	
+
 	func serialize(context: VisitorContext, node: StatementNode) -> String:
 		var condition := node.children[0] as ExpressionNode
 		var then_node := node.children[1] as SyntaxNode
@@ -1162,10 +1285,10 @@ class IfElseStatementExtension:
 
 class VerbatimStatementExtension:
 	extends StatementExtension
-	
-	func get_statement_identifier() -> String:
+
+	func get_identifier() -> String:
 		return 'verbatim'
-	
+
 	func parse(
 		_parser: Parser,
 		context: ParserContext,
@@ -1179,26 +1302,26 @@ class VerbatimStatementExtension:
 					&&
 					context.tokens[token_index+1].type == Token.Types.STATEMENT_IDENTIFIER
 					&&
-					context.tokens[token_index+1].literal == 'end' + get_statement_identifier()
+					context.tokens[token_index+1].literal == 'end' + get_identifier()
 					&&
 					context.tokens[token_index+2].type == Token.Types.STATEMENT_CLOSER
 				)
 		)
 		context.consume_some_tokens(3)  # {% end<statement_identifier> %}
-		
+
 		var content: String = content_tokens.reduce(
 			func(acc: String, tk: Token):
 				return acc + tk.whitespaces_before + tk.literal + tk.whitespaces_after
 				,
 			""
 		)
-		
+
 		return (
 			StatementNode.new()
 			.with_extension(self)
 			.with_child(RawDataNode.new().with_data(content))
 		)
-	
+
 	func serialize(context: VisitorContext, node: StatementNode) -> String:
 		if node.children.is_empty():
 			return ""
@@ -1220,7 +1343,6 @@ class VerbatimStatementExtension:
 	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
 
-
 #endregion
 
 
@@ -1233,42 +1355,55 @@ class VerbatimStatementExtension:
 ## This makes the API in statement extensions horrible.  Let's work on it.
 class ParserContext:
 	extends Resource
-	var statement_extensions: Array[StatementExtension]
+	var statement_extensions: Array[StatementExtension] = []
+	var filter_extensions: Array[FilterExtension] = []
 	var parser: Parser
 	var tokens: Array[Token]
 	var current_token_index := 0
-	
+
 	func with_parser(value: Parser) -> ParserContext:
 		self.parser = value
 		return self
-	
+
 	func with_tokens(value: Array[Token]) -> ParserContext:
 		self.tokens = value
 		return self
-	
+
 	func with_statement_extensions(value: Array[StatementExtension]) -> ParserContext:
-		self.statement_extensions = value
+		self.statement_extensions.append_array(value)
 		return self
-	
+
+	func with_filter_extensions(value: Array[FilterExtension]) -> ParserContext:
+		self.filter_extensions.append_array(value)
+		return self
+
 	func get_statement_extension(identifier: String) -> StatementExtension:
 		var i := self.statement_extensions.find_custom(
 			func(se: StatementExtension):
-				return se.get_statement_identifier() == identifier
+				return se.matches_identifier(identifier)
 		)
 		assert(i >= 0, "No statement extension found for `%s`." % identifier)
 		return self.statement_extensions[i]
-	
+
+	func get_filter_extension(identifier: String) -> FilterExtension:
+		var i := self.filter_extensions.find_custom(
+			func(fe: FilterExtension):
+				return fe.matches_identifier(identifier)
+		)
+		assert(i >= 0, "No filter extension found for `%s`." % identifier)
+		return self.filter_extensions[i]
+
 	func has_tokens_remaining(at_least := 1) -> bool:
 		return (
 			self.current_token_index + at_least
 			<=
 			self.tokens.size()
 		)
-	
+
 	## Scans the current token and returns whether it matches the type.
 	func scan_type(type: Token.Types, offset := 0) -> bool:
 		return get_current_token(offset).type == type
-	
+
 	## Consumes the provided type or yells.
 	func consume_type(type: Token.Types) -> void:
 		if get_current_token().type == type:
@@ -1277,31 +1412,31 @@ class ParserContext:
 			assert(false, "Expected a token of type %s but got %s" % [
 				type, get_current_token().type
 			])
-	
+
 	## Scans the current token and consumes it if it matches the type.
 	func match_type(type: Token.Types) -> bool:
 		var matched := get_current_token().type == type
 		if matched:
 			consume_token()
 		return matched
-	
+
 	func get_current_token(offset := 0) -> Token:
 		return self.tokens[self.current_token_index + offset]
 	func get_previous_token() -> Token:
 		return get_current_token(-1)
-	
+
 	# TODO: rename pop_current_token()  ? (this method returns)
 	func consume_current_token() -> Token:
 		consume_token()
 		return get_previous_token()
-	
+
 	func consume_token() -> void:
 		self.current_token_index += 1
-	
+
 	func consume_some_tokens(amount: int) -> void:
 		assert(amount >= 0)
 		self.current_token_index += amount
-	
+
 	func consume_until_type(type: Token.Types) -> Array[Token]:
 		var consumed: Array[Token] = []
 		while has_tokens_remaining():
@@ -1310,7 +1445,7 @@ class ParserContext:
 				break
 			consumed.append(token)
 		return consumed
-	
+
 	func consume_until(condition: Callable) -> Array[Token]:
 		var consumed: Array[Token] = []
 		var found := false
@@ -1324,7 +1459,7 @@ class ParserContext:
 		consumed.append_array(self.tokens.slice(self.current_token_index, self.current_token_index + cursor))
 		consume_some_tokens(cursor)
 		return consumed
-	
+
 	func sequence_of_types(types: Array[Token.Types]) -> Callable:
 		return (
 			func(context: ParserContext) -> bool:
@@ -1335,7 +1470,7 @@ class ParserContext:
 						break
 				return matches_all
 		)
-	
+
 	func detect_other_statement(identifier: String) -> Callable:
 		return (
 			func(context: ParserContext) -> bool:
@@ -1349,10 +1484,11 @@ class ParserContext:
 
 class Parser:
 	extends RefCounted
-	
+
 	func parse(
 		tokens: Array[Token],
 		statement_extensions: Array[StatementExtension],
+		filter_extensions: Array[FilterExtension],
 	) -> SyntaxTree:
 		var body := BodyNode.new()
 		var tree := SyntaxTree.new().with_body(body)
@@ -1361,14 +1497,15 @@ class Parser:
 			.new()
 			.with_parser(self)
 			.with_tokens(tokens)
+			.with_filter_extensions(filter_extensions)
 			.with_statement_extensions(statement_extensions)
 		)
-		
+
 		parse_tokens_until(
 			context, body,
 			func(c: ParserContext): return not c.has_tokens_remaining(),
 		)
-		
+
 		return tree
 
 	## Adds the parsed nodes as child of into_parent.
@@ -1392,7 +1529,7 @@ class Parser:
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
 					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
-				
+
 				var echo_tokens: Array[Token] = []
 				#echo_tokens.append(token)
 				#echo_tokens.append_array(tokens_subset)  # FIXME
@@ -1408,13 +1545,13 @@ class Parser:
 				return CommentNode.new()
 			_:
 				breakpoint  # implement your new "main" token type !
-		
+
 		# Somewhat safe fallback ; should not happen anyway.
 		return RawDataNode.new().with_data("")
 
 	# Grammar Quick Notes
 	# -------------------
-	# EXPRESSION = VARIABLE_IDENTIFIER
+	# EXPRESSION = LITERAL_IDENTIFIER
 	#            | LITERAL
 	#            | PREFIX_OPERATOR EXPRESSION
 	#            | EXPRESSION INFIX_OPERATOR EXPRESSION
@@ -1423,6 +1560,7 @@ class Parser:
 	#
 	# Stratified Grammar for Expressions
 	# ----------------------------------
+	# EXPRESSIONS = EXPRESSION ( "," EXPRESSION )*
 	# EXPRESSION = COMBINATION
 	# COMBINATION = EQUALITY ( ( "n"?"and" | "x"?"or" ) EQUALITY )*
 	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )*
@@ -1430,12 +1568,22 @@ class Parser:
 	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) MULTIPLICATION )*
 	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MODULO )*
 	# MODULO = FILTER ( "%" FILTER )*   → NO: conflicts with %}
-	# FILTER = UNARY ( "|" FILTER_NAME )*
+	# FILTER = UNARY ( "|" FILTER_IDENTIFIER ( "(" EXPRESSIONS ")" )? )*
 	# UNARY = ( "+" | "-" | "!" ) UNARY
 	#       | PRIMARY
 	# PRIMARY = LITERAL
-	#         | VARIABLE_IDENTIFIER
+	#         | LITERAL_IDENTIFIER
 	#         | "(" EXPRESSION ")"
+	func parse_expressions(context: ParserContext) -> ExpressionsNode:
+		var expressions_nodes := [
+			parse_expression(context),
+		]
+		while (
+			context.match_type(Token.Types.EXPRESSIONS_SEPARATOR)
+		):
+			expressions_nodes.append(parse_expression(context))
+		return ExpressionsNode.new().with_children(expressions_nodes) as ExpressionsNode
+
 	func parse_expression(context: ParserContext) -> ExpressionNode:
 		assert(context.has_tokens_remaining(), "Expected an expression, but got nothing.")
 		return parse_combination(context)
@@ -1456,7 +1604,7 @@ class Parser:
 				as CombinatorNode
 			)
 		return node
-	
+
 	func parse_equality(context: ParserContext) -> ExpressionNode:
 		var node := parse_comparison(context)
 		while (
@@ -1477,7 +1625,7 @@ class Parser:
 						.with_child(parse_equality(context))
 					)
 		return node
-	
+
 	func parse_comparison(context: ParserContext) -> ExpressionNode:
 		var node := parse_addition(context)
 		while (
@@ -1512,7 +1660,7 @@ class Parser:
 						.with_child(parse_comparison(context))
 					)
 		return node
-	
+
 	func parse_addition(context: ParserContext) -> ExpressionNode:
 		var node := parse_multiplication(context)
 		while (
@@ -1535,9 +1683,9 @@ class Parser:
 				_:
 					breakpoint
 		return node
-	
+
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
-		var node := parse_unary(context)
+		var node := parse_filter(context)
 		while (
 			context.match_type(Token.Types.OPERATOR_MULTIPLICATION) or
 			context.match_type(Token.Types.OPERATOR_DIVISION)
@@ -1556,7 +1704,7 @@ class Parser:
 						.with_child(parse_multiplication(context))
 					)
 		return node
-	
+
 	# FIXME: use a filter for modulo, not the % symbol
 	#func parse_modulo(context: ParserContext) -> ExpressionNode:
 		#var node := parse_unary(context)
@@ -1567,9 +1715,35 @@ class Parser:
 				#.with_child(parse_modulo(context))
 			#)
 		#return node
-	
-	#func parse_filter(context: ParserContext) -> ExpressionNode:
-	
+
+	func parse_filter(context: ParserContext) -> ExpressionNode:
+		var node := parse_unary(context)
+		while context.match_type(Token.Types.FILTER):
+			var subject := node
+
+			# FIXME: parse literal identifier
+			var literal_identifier_node := parse_literal(context)
+
+			var filter_identifier := literal_identifier_node.tokens[0].literal
+
+			var filter_extension := context.get_filter_extension(filter_identifier)
+			assert(filter_extension)
+
+			node = FilterNode.new()
+			node.with_extension(filter_extension)
+			node.with_subject(subject)
+			#node.children.append(subject)
+			#node.children.append(literal_identifier_node)
+			if context.match_type(Token.Types.EXPRESSION_GROUP_OPENER):
+				node.children.append(parse_expressions(context))
+				context.consume_type(Token.Types.EXPRESSION_GROUP_CLOSER)
+			#node = (
+				#FilterNode.new()
+				#.with_child(subject)
+			#)
+		return node
+
+
 	func parse_unary(context: ParserContext) -> ExpressionNode:
 		var node: ExpressionNode
 		if (
@@ -1584,15 +1758,15 @@ class Parser:
 					node = NegativeUnaryOperatorNode.new()
 				Token.Types.OPERATOR_NOT:
 					node = NotUnaryOperatorNode.new()
-		
+
 		if node:
 			node.with_child(parse_primary(context))
 			node.with_token(context.get_previous_token())
 		else:
 			node = parse_primary(context)
-		
+
 		return node
-	
+
 	func parse_primary(context: ParserContext) -> ExpressionNode:
 		if context.get_current_token().type == Token.Types.EXPRESSION_GROUP_OPENER:
 			context.consume_token()
@@ -1603,12 +1777,13 @@ class Parser:
 				])
 			return inside
 		return parse_literal(context)
-	
+
 	func parse_literal(context: ParserContext) -> ExpressionNode:
 		var token := context.consume_current_token()
 		match token.type:
-			Token.Types.VARIABLE_IDENTIFIER:
-				return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token) as VariableIdentifierNode
+			Token.Types.LITERAL_IDENTIFIER:
+				return VariableIdentifierNode.from_token(token)
+				#return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token) as VariableIdentifierNode
 			Token.Types.LITERAL_BOOLEAN_TRUE:
 				return BooleanLiteralNode.from_token(token, true)
 			Token.Types.LITERAL_BOOLEAN_FALSE:
@@ -1622,7 +1797,7 @@ class Parser:
 			_:
 				raise_error("Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
-	
+
 	func raise_error(message: String):
 		printerr(message)
 		assert(false, message)
@@ -1655,17 +1830,19 @@ class EvaluatorVisitor:
 ## Renders a source template using the variables.
 ## The main method of the string template engine.
 func render(source: String, variables: Dictionary) -> String:
-	
+
 	var tokenizer := Tokenizer.new()
 	var tokens := tokenizer.tokenize(source)
-	
+
 	var parser := Parser.new()
-	var syntax_tree := parser.parse(tokens, self.statement_extensions)
-	
+	var syntax_tree := parser.parse(
+		tokens, self.statement_extensions, self.filter_extensions,
+	)
+
 	var visitor_context := VisitorContext.new()
 	visitor_context.variables = variables
-	
+
 	var visitor := EvaluatorVisitor.new()
 	var output := visitor.visit(syntax_tree, visitor_context)
-	
+
 	return output
