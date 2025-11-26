@@ -14,6 +14,69 @@ var statement_extensions: Array[StatementExtension] = [
 	VerbatimStatementExtension.new(),
 ]
 
+
+## A basic (and quite inefficient) view on a portion of a string.
+## The goal was/is to copy less strings.
+## But regex search using offset ignores anchors like `^`, so we copy anyway.
+## Not when shrinking though, so it's still worth having this I think.
+class StringView:
+	extends Resource
+	# Private variables with reserved words; hence ugly dunders
+	@export_storage var __string: String  # immutable whole string
+	@export_storage var __start: int
+	@export_storage var __length: int
+	
+	func _init(
+		target_string := "",    ## Provide this; optional cause it MUST be IIRC
+		optional_start := -1,   ## Defaults to 0
+		optional_length := -1,  ## Defaults to the string's length
+	) -> void:
+		self.__string = target_string
+		if optional_start < 0:
+			optional_start = 0
+		self.__start = optional_start
+		if optional_length < 0:
+			optional_length = self.__string.length()
+		self.__length = optional_length
+		sanitize_delimiters()
+	
+	func _to_string() -> String:
+		return get_as_string()
+	
+	func get_as_string() -> String:
+		return __string.substr(__start, __length)
+	
+	func length() -> int:
+		return __length
+	
+	func begins_with(prefix: String) -> bool:
+		return prefix == __string.substr(__start, prefix.length())
+	
+	func sanitize_delimiters() -> void:
+		self.__start = clampi(__start, 0, __string.length())
+		self.__length = clampi(__length, 0, __string.length() - __start)
+	
+	## Faster but breaks line anchor metacharacters like ^ and $
+	func rsearch(regex: RegEx) -> RegExMatch:
+		return regex.search(__string, __start, __start + __length)
+	
+	## Use this if the regex uses ^ or $
+	func rsearch_start(regex: RegEx) -> RegExMatch:
+		return regex.search(get_as_string())  # slower, but it "Just Works".
+	
+	func shrink_from_start_by(amount: int) -> void:
+		self.__start += amount
+		self.__length -= amount
+		sanitize_delimiters()
+	
+	func read_character_at(relative_position: int) -> String:
+		return __string[
+			clampi(__start + relative_position, 0, __string.length() - 1)
+		]
+
+
+#region Tokenization
+
 ## A syntax token of the domain specific language of the string template engine.
 ## The template source string is tokenized into a stream of those tokens,
 ## and from them the parser builds the syntax tree.
@@ -72,65 +135,6 @@ class Token:
 	
 	func _to_string() -> String:
 		return self.literal
-
-
-## A basic (and quite inefficient) view on a portion of a string.
-## The goal was/is to copy less strings.
-## But regex search using offset ignores line anchors like ^, so we copy anyway.
-## Not when shrinking though, so it's still worth having this I think.
-class StringView:
-	extends Resource
-	@export_storage var __string: String  # immutable whole string
-	@export_storage var __start: int
-	@export_storage var __length: int
-	
-	func _init(
-		target_string := "",    ## Provide this; optional cause it MUST be IIRC
-		optional_start := -1,   ## Defaults to 0
-		optional_length := -1,  ## Defaults to the string's length
-	) -> void:
-		self.__string = target_string
-		if optional_start < 0:
-			optional_start = 0
-		self.__start = optional_start
-		if optional_length < 0:
-			optional_length = self.__string.length()
-		self.__length = optional_length
-		sanitize_delimiters()
-	
-	func _to_string() -> String:
-		return get_as_string()
-	
-	func get_as_string() -> String:
-		return self.__string.substr(self.__start, self.__length)
-	
-	func length() -> int:
-		return self.__length
-	
-	func begins_with(prefix: String) -> bool:
-		return prefix == self.__string.substr(self.__start, prefix.length())
-	
-	func sanitize_delimiters() -> void:
-		self.__start = clampi(self.__start, 0, self.__string.length())
-		self.__length = clampi(self.__length, 0, self.__string.length() - self.__start)
-	
-	## Faster but breaks line anchor metacharacters like ^ and $
-	func rsearch(regex: RegEx) -> RegExMatch:
-		return regex.search(self.__string, self.__start, self.__start + self.__length)
-	
-	## Use this if the regex uses ^ or $
-	func rsearch_start(regex: RegEx) -> RegExMatch:
-		return regex.search(get_as_string())  # slower, but it "Just Works".
-	
-	func shrink_from_start_by(amount: int) -> void:
-		self.__start += amount
-		self.__length -= amount
-		sanitize_delimiters()
-	
-	func read_character_at(relative_position: int) -> String:
-		return self.__string[
-			clampi(self.__start+relative_position, 0, self.__string.length()-1)
-		]
 
 
 ## Probably closer to a Lexer now, as its states are kinda tied to our grammar.
@@ -233,12 +237,12 @@ class Tokenizer:
 		has_compiled = self.float_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"(?:" +
-			"\\d+\\.\\d*" +        # 2.7 or 2.
-			"|\\.\\d+" +           # .2
-			"|\\d+\\.\\d*e\\d+" +  # 1.618e3
+			"\\d+\\.\\d*e\\d+" +   # 1.618e3
 			"|\\d*\\.\\d+e\\d+" +  # .333e10
 			"|\\d+e\\d+" +         # 3e9
-			# TODO: support 1.618e3 and 0xff and 0b101010
+			"|\\d+\\.\\d*" +       # 2.7 or 2.
+			"|\\.\\d+" +           # .2
+			# TODO: support 0xff and 0b101010
 			")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
@@ -713,6 +717,10 @@ class Tokenizer:
 			.replace("#", "\\#")
 		)
 
+#endregion
+
+
+#region Syntax Nodes
 
 ## Ubiquitous element of our (Abstract) Syntax Tree.
 class SyntaxNode:
@@ -812,10 +820,19 @@ class VariableIdentifierNode:
 class BooleanLiteralNode:
 	extends ExpressionNode
 	@export var value: bool
-
-	func with_value(some_value: bool) -> BooleanLiteralNode:
-		self.value = some_value
-		return self
+	
+	static func from_token(token: Token, truth: bool) -> BooleanLiteralNode:
+		assert(
+			token.type == Token.Types.LITERAL_BOOLEAN_TRUE or
+			token.type == Token.Types.LITERAL_BOOLEAN_FALSE
+		)
+		var node := BooleanLiteralNode.new()
+		node.value = truth
+		node.tokens.append(token)
+		assert(str(node.value) == token.literal, "%s != %s" % [
+			str(node.value), token.literal,
+		])
+		return node
 
 	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
@@ -825,9 +842,17 @@ class IntegerLiteralNode:
 	extends ExpressionNode
 	@export var value: int
 
-	func with_value(some_value: int) -> IntegerLiteralNode:
-		self.value = some_value
-		return self
+	static func from_token(token: Token) -> IntegerLiteralNode:
+		assert(token.type == Token.Types.LITERAL_INTEGER)
+		assert(token.literal.length() >= 1)
+		var node := IntegerLiteralNode.new()
+		node.value = int(token.literal)
+		node.tokens.append(token)
+		# Commented because 11 != 011
+		#assert(str(node.value) == token.literal, "%s != %s" % [
+			#str(node.value), token.literal,
+		#])
+		return node
 
 	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
@@ -843,9 +868,10 @@ class FloatLiteralNode:
 		var node := FloatLiteralNode.new()
 		node.value = float(token.literal)
 		node.tokens.append(token)
-		assert(str(node.value) == token.literal, "%s != %s" % [
-			str(node.value), token.literal,
-		])
+		# Commented because 1618.0 != 1.618e3
+		#assert(str(node.value) == token.literal, "%s != %s" % [
+			#str(node.value), token.literal,
+		#])
 		return node
 	
 	func with_value(some_value: float) -> FloatLiteralNode:
@@ -869,10 +895,6 @@ class StringLiteralNode:
 		node.value = node.value.replace("\\\\", "\\")
 		node.tokens.append(token)
 		return node
-
-	#func with_value(some_value: String) -> StringLiteralNode:
-		#self.value = some_value
-		#return self
 
 	func evaluate(_context: VisitorContext) -> Variant:
 		return self.value
@@ -1042,7 +1064,10 @@ class StatementNode:
 	
 	func serialize(context: VisitorContext) -> String:
 		return self.extension.serialize(context, self)
+#endregion
 
+
+#region Statement Extensions
 
 class StatementExtension:
 	extends Resource
@@ -1195,6 +1220,11 @@ class VerbatimStatementExtension:
 	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
 
+
+#endregion
+
+
+#region Parsing
 
 ## Holds the context of a parser's run.
 ## I thought we'd have to backtrack and therefore copy a context around,
@@ -1359,7 +1389,6 @@ class Parser:
 				return RawDataNode.new().with_data(token.literal).with_token(token)
 			Token.Types.ECHO_OPENER:
 				#var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
-				#var tokens_subset: Array[Token] = []
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
 					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
@@ -1419,14 +1448,11 @@ class Parser:
 			context.match_type(Token.Types.COMBINATOR_NAND) or
 			context.match_type(Token.Types.COMBINATOR_XOR)
 		):
-			#prints("parser token", context.get_previous_token())
-			#var combinator_token := context.get_previous_token()
 			node = (
 				CombinatorNode.new()
-				#.with_token(combinator_token)
 				.with_child(node)
 				.with_child(parse_combination(context))
-				.with_token(context.get_previous_token())
+				.with_token(context.get_previous_token())  # /!. LAST! /!.
 				as CombinatorNode
 			)
 		return node
@@ -1584,17 +1610,15 @@ class Parser:
 			Token.Types.VARIABLE_IDENTIFIER:
 				return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token) as VariableIdentifierNode
 			Token.Types.LITERAL_BOOLEAN_TRUE:
-				return BooleanLiteralNode.new().with_value(true).with_token(token)
+				return BooleanLiteralNode.from_token(token, true)
 			Token.Types.LITERAL_BOOLEAN_FALSE:
-				return BooleanLiteralNode.new().with_value(false).with_token(token)
+				return BooleanLiteralNode.from_token(token, false)
 			Token.Types.LITERAL_INTEGER:
-				return IntegerLiteralNode.new().with_value(int(token.literal)).with_token(token)
+				return IntegerLiteralNode.from_token(token)
 			Token.Types.LITERAL_FLOAT:
-				#return FloatLiteralNode.new().with_value(float(token.literal)).with_token(token)
 				return FloatLiteralNode.from_token(token)
 			Token.Types.LITERAL_STRING:
 				return StringLiteralNode.from_token(token)
-				#return StringLiteralNode.new().with_value(token.literal.substr(1, token.literal.length()-2)).with_token(token)
 			_:
 				raise_error("Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
@@ -1603,6 +1627,10 @@ class Parser:
 		printerr(message)
 		assert(false, message)
 
+#endregion
+
+
+#region Visitors
 
 class VisitorContext:
 	extends Resource
@@ -1613,22 +1641,16 @@ class VisitorContext:
 ## Outputs the serialized template with variables replaced and logic applied.
 class EvaluatorVisitor:
 	extends RefCounted
-	
-	var output: String
-	
-	func reset() -> void:
-		self.output = ""
-	
+
 	func visit(tree: SyntaxTree, context: VisitorContext) -> String:
-		reset()
-		visit_node(tree, context)
-		return self.output
-	
-	func visit_node(node: SyntaxNode, context: VisitorContext) -> void:
-		self.output += node.serialize(context)
+		return tree.serialize(context)
+
 
 #class CompilerVisitor:  # TODO: cache the template as pure GdScript
 #class HighlighterVisitor:  # TODO: syntax highlighting for Godot's code editor
+
+#endregion
+
 
 ## Renders a source template using the variables.
 ## The main method of the string template engine.
@@ -1636,10 +1658,6 @@ func render(source: String, variables: Dictionary) -> String:
 	
 	var tokenizer := Tokenizer.new()
 	var tokens := tokenizer.tokenize(source)
-	
-	#prints("Source:", source)
-	#prints("Variables:", variables)
-	#prints("Tokens:", tokens)
 	
 	var parser := Parser.new()
 	var syntax_tree := parser.parse(tokens, self.statement_extensions)

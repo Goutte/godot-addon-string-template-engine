@@ -119,6 +119,7 @@ func test_a_bunch_of_rules() -> void:
 			&'rule': "Floats",
 			&'template': """
 			{{ 1.618 }}
+			{{ 1.618e3 }}
 			1.0 / phi == {{ 1.0 / phi }}
 			      phi == {{ phi }}
 			phi * phi == {{ phi * phi }}
@@ -129,6 +130,7 @@ func test_a_bunch_of_rules() -> void:
 			},
 			&'expected': """
 			1.618
+			1618.0
 			1.0 / phi == 0.61803398874989
 			      phi == 1.61803398874989
 			phi * phi == 2.61803398874989
@@ -144,9 +146,7 @@ func test_a_bunch_of_rules() -> void:
 			{{ "The ship" }} "Espoir"
 			{{ "The ship \\"Espoir\\"" }}
 			""",
-			&'variables': {
-				&'name': "Pierre",
-			},
+			&'variables': {},
 			&'expected': """
 			.
 			{{ "🦋" }} yields 🦋

@@ -47,19 +47,27 @@ Features
 	- [x] arithmetic `+ - * /`
 	- [x] comparison `== != < <= > >=`
 	- [x] combination `and or nand xor`
-	- [ ] strings
+	- [x] strings
+	- [ ] concatenation `~`
+	- [x] arrays
+	- [ ] arrays' indices  `foo[4]`
+	- [x] objects
+	- [ ] objects' properties
+	- [ ] objects' methods
 	- [ ] filters
 - [ ] statements
 	- [x] print `{{ … }}`
-	- [x] if else
+	- [x] if else `{% if … %} … {% else %} … {% endif %}`
 	- [ ] while
 	- [ ] for
 	- [ ] set
 	- [ ] extends
 	- [ ] block
 	- [x] verbatim
+- [ ] filters
+	- [ ] uppercase
 - [ ] whitespace handling
-	- [ ] using delimiters ({{- -}} {{~ ~}})
+	- [ ] using delimiters `{{- -}} {{~ ~}}`
 	- [ ] using engine options
 		- [ ] clear lines of whitespaces due to statements
 - [ ] error handling
