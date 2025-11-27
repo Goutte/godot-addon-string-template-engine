@@ -1,5 +1,21 @@
 extends AbstractTest
 
+## A test object.
+class Person:
+	extends RefCounted
+	var rank := 0
+	var name := ""
+	var surname := ""
+	func _init(
+		some_rank: int,
+		some_name: String,
+		some_surname: String,
+	) -> void:
+		self.rank = some_rank
+		self.name = some_name
+		self.surname = some_surname
+		
+
 func test_a_bunch_of_rules() -> void:
 	var data := [
 		{
@@ -47,7 +63,7 @@ func test_a_bunch_of_rules() -> void:
 			&'expected': "Hello there!",
 		},
 		{
-			&'rule': "Accept unicode runes are values",
+			&'rule': "Accept unicode runes as values",
 			&'template': "Hello {{ surname }} {{ name }}{{ emote }}!",
 			&'variables': {
 				&'surname': "🤖 Godot's",
@@ -55,6 +71,14 @@ func test_a_bunch_of_rules() -> void:
 				&'emote': "♥",
 			},
 			&'expected': "Hello 🤖 Godot's Community ♥♥!",
+		},
+		{
+			&'rule': "Access objects' properties with .",
+			&'template': "Hello {{ person.name }} {{ person.surname }}!",
+			&'variables': {
+				&'person': Person.new(42, "Jean", "Valjean"),
+			},
+			&'expected': "Hello Jean Valjean!",
 		},
 		{
 			&'rule': "Accept multiline templates",
@@ -545,6 +569,18 @@ func test_a_bunch_of_rules() -> void:
 			&'expected': """
 			
 			54321
+			""",
+		},
+		{
+			&'rule': "For statement",
+			&'template': """
+			{% for i in numbers %}{{ i }} {% endfor %}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5, 7, 11],
+			},
+			&'expected': """
+			2 3 5 7 11 
 			""",
 		},
 		{

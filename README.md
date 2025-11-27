@@ -53,18 +53,28 @@ Features
 	- [x] arrays
 	- [ ] arrays' indices  `foo[4]`
 	- [x] objects
-	- [ ] objects' properties
+	- [x] objects' properties `person.name`
 	- [ ] objects' methods
 	- [x] filters `|`
+	- [ ] constants like `TAU`
 - [ ] statements
 	- [x] print `{{ … }}`
+	- [x] set `{% set … = … %}`
 	- [x] if else `{% if … %} … {% else %} … {% endif %}`
 	- [x] while `{% while … %} … {% endwhile %}`
 	- [ ] for
-	- [x] set
+		- [x] `{% for … in … %} … {% endfor %}`
+		- [ ] `loop.index`  The current iteration of the loop. (1 indexed)
+		- [ ] `loop.index0`  The current iteration of the loop. (0 indexed)
+		- [ ] `loop.revindex`  The number of iterations from the end of the loop (1 indexed)
+		- [ ] `loop.revindex0`  The number of iterations from the end of the loop (0 indexed)
+		- [ ] `loop.first`  True if first iteration
+		- [ ] `loop.last`  True if last iteration
+		- [ ] `loop.length`  The number of items in the sequence
+		- [ ] `loop.parent`  The parent context
 	- [ ] extends
 	- [ ] block
-	- [x] verbatim (STILL BUGGY)
+	- [x] verbatim (SOMEWHAT BUGGY)
 - [ ] filters (see [Twig Filters](https://twig.symfony.com/doc/3.x/filters/index.html))
 	- [x] abs
 	- [ ] batch

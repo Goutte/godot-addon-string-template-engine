@@ -13,6 +13,7 @@ var statement_extensions: Array[StatementExtension] = [
 	IfElseStatementExtension.new(),
 	SetStatementExtension.new(),
 	WhileStatementExtension.new(),
+	ForStatementExtension.new(),
 	VerbatimStatementExtension.new(),
 ]
 
@@ -113,7 +114,7 @@ class Token:
 	enum Types {
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
 		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
-		# FIXME: ECHO → PRINT
+		# FIXME: ECHO → PRINT ?
 		ECHO_OPENER,              ## {{
 		ECHO_CLOSER,              ## }}
 		COMMENT_OPENER,           ## {#
@@ -126,6 +127,7 @@ class Token:
 		EXPRESSION_GROUP_OPENER,  ## (
 		EXPRESSION_GROUP_CLOSER,  ## )
 		EXPRESSIONS_SEPARATOR,    ## ,
+		ACCESSOR_PROPERTY,        ## .
 		FILTER,                   ## |
 		LITERAL_IDENTIFIER,       ## ^[0-9a-z_]+$  (roughly)
 		LITERAL_BOOLEAN_TRUE,     ## true
@@ -149,9 +151,11 @@ class Token:
 		COMBINATOR_OR,            ## or
 		COMBINATOR_NAND,          ## nand
 		COMBINATOR_XOR,           ## xor
+		INFIX_IN,                 ## in
 	}
 
 	@export var type := Types.UNKNOWN
+	## aka. lexeme; the raw value found in the source template
 	@export var literal := ""
 	@export var whitespaces_before := ""
 	@export var whitespaces_after := ""
@@ -192,14 +196,15 @@ class Tokenizer:
 	var symbol_statement_assign := '='
 
 	var symbol_filter := '|'
-	var symbol_group_opener := '('
-	var symbol_group_closer := ')'
+	var symbol_expression_group_opener := '('
+	var symbol_expression_group_closer := ')'
 	var symbol_combinator_and := 'and'
 	var symbol_combinator_or := 'or'
 	var symbol_combinator_nand := 'nand'
 	var symbol_combinator_xor := 'xor'
 	var symbol_boolean_true := 'true'
 	var symbol_boolean_false := 'false'
+	var symbol_infix_in := 'in'
 
 	# The order we tokenize expressions (if cascade) is hardcoded, right now.
 	# Therefore, the following values are read-only;
@@ -218,6 +223,7 @@ class Tokenizer:
 	const symbol_comparator_greater_or_equal_than := '>='
 	const symbol_string_delimiter := '"'  # single rune, CANNOT be backslash
 	const symbol_group_separator := ','
+	const symbol_accessor_property := '.'
 
 	# Privates
 	var state: States
@@ -263,6 +269,7 @@ class Tokenizer:
 		has_compiled = self.integer_literal_regex.compile(
 			LINE_START_ANCHOR +
 			"[0-9]+"
+			# TODO: support 0xff and 0b101010
 		)
 		assert(has_compiled == OK, "Numbers must be ßr0k3n")
 
@@ -275,7 +282,6 @@ class Tokenizer:
 			"|\\d+e\\d+" +         # 3e9
 			"|\\d+\\.\\d*" +       # 2.7 or 2.
 			"|\\.\\d+" +           # .2
-			# TODO: support 0xff and 0b101010
 			")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
@@ -512,6 +518,7 @@ class Tokenizer:
 		if tokenize_literal_float() == OK: return OK  # before integer
 		if tokenize_literal_integer() == OK: return OK
 		if tokenize_literal_string() == OK: return OK
+		if tokenize_accessor_property() == OK: return OK
 		if tokenize_operator_addition() == OK: return OK
 		if tokenize_operator_subtraction() == OK: return OK
 		if tokenize_operator_multiplication() == OK: return OK
@@ -525,6 +532,7 @@ class Tokenizer:
 		if tokenize_group_delimiter() == OK: return OK
 		if tokenize_expressions_separator() == OK: return OK
 		if tokenize_filter() == OK: return OK
+		if tokenize_infix_in() == OK: return OK
 		#if tokenize_function_call() == OK: return OK
 		if tokenize_literal_identifier() == OK: return OK  # lastly
 		return ERR_DOES_NOT_EXIST
@@ -561,6 +569,16 @@ class Tokenizer:
 			Token.Types.FILTER,
 		)
 
+	func tokenize_infix_in() -> Error:
+		return tokenize_symbol(
+			self.symbol_infix_in,
+			Token.Types.INFIX_IN,
+		)
+	func tokenize_accessor_property() -> Error:
+		return tokenize_symbol(
+			self.symbol_accessor_property,
+			Token.Types.ACCESSOR_PROPERTY,
+		)
 	func tokenize_statement_assign() -> Error:
 		return tokenize_symbol(
 			self.symbol_statement_assign,
@@ -569,11 +587,11 @@ class Tokenizer:
 
 	func tokenize_group_delimiter() -> Error:
 		if OK == tokenize_symbol(
-			self.symbol_group_opener,
+			self.symbol_expression_group_opener,
 			Token.Types.EXPRESSION_GROUP_OPENER,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_group_closer,
+			self.symbol_expression_group_closer,
 			Token.Types.EXPRESSION_GROUP_CLOSER,
 		): return OK
 		return ERR_INVALID_DATA
@@ -841,8 +859,10 @@ class RawDataNode:
 		self.data += value
 		return self
 
-	func serialize_self(_context: VisitorContext) -> String:
+	func evaluate(_context: VisitorContext) -> Variant:
 		return self.data
+	#func serialize_self(_context: VisitorContext) -> String:
+		#return self.data
 
 
 class CommentNode:
@@ -1091,6 +1111,29 @@ class CombinatorNode:
 		return ""
 
 
+class PropertyAccessorNode:
+	extends ExpressionNode
+	
+	@export var object: ExpressionNode
+	@export var property: IdentifierLiteralNode
+	func with_object(value: ExpressionNode) -> PropertyAccessorNode:
+		self.object = value
+		self.children.push_front(value)
+		return self
+	func with_property(value: ExpressionNode) -> PropertyAccessorNode:
+		self.property = value
+		self.children.push_back(value)
+		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		var obj: Variant = self.object.evaluate(context)
+		var prop: String = self.property.identifier
+		return obj.get(prop)
+
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
 class FilterNode:
 	extends ExpressionNode
 	@export var extension: FilterExtension
@@ -1112,7 +1155,13 @@ class FilterNode:
 		return serialize_self(context)
 
 
-#class StatementIdentifierNode:  # unused
+#class StatementIdentifierNode:
+	#extends LiteralIdentifierNode
+	#@export var identifier: String
+	#func with_identifier(value: String) -> StatementIdentifierNode:
+		#self.identifier = value
+		#return self
+#class VariableIdentifierNode:
 	#extends ExpressionNode
 	#@export var identifier: String
 	#func with_identifier(value: String) -> StatementIdentifierNode:
@@ -1140,6 +1189,10 @@ class StatementNode:
 	func with_extension(value: StatementExtension) -> StatementNode:
 		self.extension = value
 		return self
+
+	# TODO
+	#func evaluate(context: VisitorContext) -> Variant:
+		#return self.extension.evaluate(context, self)
 
 	func serialize(context: VisitorContext) -> String:
 		return self.extension.serialize(context, self)
@@ -1214,6 +1267,8 @@ class AbsFilterExtension:
 
 #region Statement Extensions
 
+## Extend this to implement a new statement.
+## Then append an instance of it to StringEngine.statement_extensions
 class StatementExtension:
 	extends Resource
 
@@ -1221,20 +1276,25 @@ class StatementExtension:
 		breakpoint  # override me !
 		return ''
 
-	## When this method is called by the parser, the first two tokens have been
-	## consumed already: {% <identifier> <we are here> … %} … …
+	## When this method is called by the parser, the opener and identifier
+	## tokens have been consumed already: {% <identifier> <we are here> … %} … …
 	@warning_ignore("unused_parameter")
 	func parse(
 		parser: Parser,
 		context: ParserContext,
-		#identifier_token: Token,
 	) -> StatementNode:
 		breakpoint  # override me !
-		return StatementNode.new().with_extension(self)
+		#var opener_token := get_opener_token(context)
+		#var identifier_token := get_identifier_token(context)
+		var _closer_token := context.consume_type(Token.Types.STATEMENT_CLOSER)
+		return (StatementNode.new().with_extension(self))
 
 	@warning_ignore("unused_parameter")
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		return ""  # you probably want to override me
+	
+	func serialize(context: VisitorContext, node: StatementNode) -> String:
+		return str(evaluate(context, node))
 
 	func get_opener_token(context: ParserContext) -> Token:
 		return context.get_current_token(-2)
@@ -1248,13 +1308,11 @@ class StatementExtension:
 class IfElseStatementExtension:
 	extends StatementExtension
 
-	func get_identifier() -> String:
-		return 'if'
+	func get_identifier() -> String:	return 'if'
 
 	func parse(
 		parser: Parser,
 		context: ParserContext,
-		#identifier_token: Token,
 	) -> StatementNode:
 		# The engine has already parsed the statement opener and identifier.
 		# The rest is up to us, now.
@@ -1280,7 +1338,7 @@ class IfElseStatementExtension:
 		var else_node: SyntaxNode
 		if found_else:
 			else_node = SyntaxNode.new()
-			context.parser.parse_tokens_until(
+			parser.parse_tokens_until(
 				context,
 				else_node,
 				detect_end,
@@ -1299,7 +1357,7 @@ class IfElseStatementExtension:
 
 		return if_node
 
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var condition := node.children[0] as ExpressionNode
 		var then_node := node.children[1] as SyntaxNode
 		var condition_evaluated: Variant = condition.evaluate(context)
@@ -1314,15 +1372,14 @@ class IfElseStatementExtension:
 class VerbatimStatementExtension:
 	extends StatementExtension
 
-	func get_identifier() -> String:
-		return 'verbatim'
+	func get_identifier() -> String:	return 'verbatim'
 
 	func parse(
 		_parser: Parser,
 		context: ParserContext,
-		#identifier_token: Token,
 	) -> StatementNode:
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
+		# TODO: less awkwardness please
 		var content_tokens := context.consume_until(
 			func(token_index: int):
 				return (
@@ -1350,10 +1407,10 @@ class VerbatimStatementExtension:
 			.with_child(RawDataNode.new().with_data(content))
 		)
 
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func evaluate(context: VisitorContext, node: StatementNode) -> String:
 		if node.children.is_empty():
 			return ""
-		assert(node.children.size() == 1, "Why would there be more ?")
+		assert(node.children.size() == 1, "Verbatim has gliiitcHHe…d")
 		return node.children[0].serialize(context)
 
 
@@ -1364,13 +1421,8 @@ class SetStatementExtension:
 	func parse(
 		parser: Parser,
 		context: ParserContext,
-		#_identifier_token: Token,
 	) -> StatementNode:
-		var opener_token := context.get_current_token(-2)
-		var identifier_token := context.get_current_token(-1)
-		
-		# FIXME: use parse_literal_identifier() here
-		var variable_identifier := parser.parse_literal(context)
+		var variable_identifier := parser.parse_literal_identifier(context)
 		context.consume_type(Token.Types.STATEMENT_ASSIGN)
 		var value := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
@@ -1382,11 +1434,56 @@ class SetStatementExtension:
 			.with_child(value)
 		)
 	
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
 		var value = (node.children[1] as ExpressionNode).evaluate(context)
 		context.variables.set(identifier, value)
 		return ""
+
+
+class ForStatementExtension:
+	extends StatementExtension
+	func get_identifier() -> String:	return 'for'
+
+	func parse(parser: Parser, context: ParserContext) -> StatementNode:
+		var element := parser.parse_literal_identifier(context)
+		context.consume_type(Token.Types.INFIX_IN)
+		var iterable := parser.parse_expression(context)
+		context.consume_type(Token.Types.STATEMENT_CLOSER)
+		
+		var detect_end := context.detect_other_statement('end' + get_identifier())
+		var for_body := SyntaxNode.new()
+		parser.parse_tokens_until(
+			context,
+			for_body,
+			detect_end,
+		)
+		context.consume_some_tokens(3)  # {% endfor %}
+		
+		return (
+			StatementNode.new()
+			.with_extension(self)
+			.with_child(element)
+			.with_child(iterable)
+			.with_child(for_body)
+		)
+
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
+		var loops_left := 1_000_000
+		var element := node.children[0] as IdentifierLiteralNode
+		var iterable := node.children[1] as ExpressionNode
+		var body := node.children[2] as SyntaxNode
+		var output := ""
+		for thing in iterable.evaluate(context):
+			context.variables[element.identifier] = thing
+			output += body.serialize(context)
+			loops_left -= 1
+			if loops_left == 0:
+				break
+		if loops_left == 0:
+			push_error("Possible infinite loop!")
+			breakpoint
+		return output
 
 
 class WhileStatementExtension:
@@ -1396,7 +1493,6 @@ class WhileStatementExtension:
 	func parse(
 		parser: Parser,
 		context: ParserContext,
-		#_identifier_token: Token,
 	) -> StatementNode:
 		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
@@ -1417,7 +1513,7 @@ class WhileStatementExtension:
 			.with_child(while_body)
 		)
 
-	func serialize(context: VisitorContext, node: StatementNode) -> String:
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var loops_left := 1_000_000
 		var condition := node.children[0] as ExpressionNode
 		var body := node.children[1] as SyntaxNode
@@ -1443,10 +1539,16 @@ class WhileStatementExtension:
 ## This makes the API in statement extensions horrible.  Let's work on it.
 class ParserContext:
 	extends Resource
+	## All statements are implemented via Statement Extensions.
 	var statement_extensions: Array[StatementExtension] = []
+	## All filters are implemented via Filter Extensions.
 	var filter_extensions: Array[FilterExtension] = []
+	## You saw nothing.
 	var parser: Parser
+	## Our stream of tokens we're parsing.
 	var tokens: Array[Token]
+	## Our current cursor index in the stream of tokens above.
+	## We would not need this if we used a TokenStream.
 	var current_token_index := 0
 
 	func with_parser(value: Parser) -> ParserContext:
@@ -1492,15 +1594,6 @@ class ParserContext:
 	func scan_type(type: Token.Types, offset := 0) -> bool:
 		return get_current_token(offset).type == type
 
-	## Consumes the provided type or yells.
-	func consume_type(type: Token.Types) -> void:
-		if get_current_token().type == type:
-			consume_token()
-		else:
-			assert(false, "Expected a token of type %s but got %s" % [
-				type, get_current_token().type
-			])
-
 	## Scans the current token and consumes it if it matches the type.
 	func match_type(type: Token.Types) -> bool:
 		var matched := get_current_token().type == type
@@ -1513,17 +1606,26 @@ class ParserContext:
 	func get_previous_token() -> Token:
 		return get_current_token(-1)
 
-	# TODO: rename pop_current_token()  ? (this method returns)
 	func consume_current_token() -> Token:
-		consume_token()
-		return get_previous_token()
+		return consume_token()
 
-	func consume_token() -> void:
+	func consume_token() -> Token:
 		self.current_token_index += 1
+		return get_previous_token()
 
 	func consume_some_tokens(amount: int) -> void:
 		assert(amount >= 0)
 		self.current_token_index += amount
+
+	## Consumes and returns a token of the provided type, or yells.
+	func consume_type(type: Token.Types) -> Token:
+		if get_current_token().type == type:
+			return consume_token()
+		else:
+			assert(false, "Expected a token of type %s but got %s" % [
+				type, get_current_token().type
+			])
+			return null  # ErrorToken ?
 
 	func consume_until_type(type: Token.Types) -> Array[Token]:
 		var consumed: Array[Token] = []
@@ -1591,7 +1693,7 @@ class Parser:
 
 		parse_tokens_until(
 			context, body,
-			func(c: ParserContext): return not c.has_tokens_remaining(),
+			func(ctx: ParserContext): return not ctx.has_tokens_remaining(),
 		)
 
 		return tree
@@ -1658,7 +1760,8 @@ class Parser:
 	# MODULO = FILTER ( "%" FILTER )*   → NO: conflicts with %}
 	# FILTER = UNARY ( "|" FILTER_IDENTIFIER ( "(" EXPRESSIONS ")" )? )*
 	# UNARY = ( "+" | "-" | "!" ) UNARY
-	#       | PRIMARY
+	#       | SECONDARY
+	# SECONDARY = PRIMARY ( "." LITERAL_IDENTIFIER )*
 	# PRIMARY = LITERAL
 	#         | LITERAL_IDENTIFIER
 	#         | "(" EXPRESSION ")"
@@ -1840,21 +1943,31 @@ class Parser:
 			context.match_type(Token.Types.OPERATOR_SUBTRACTION)
 		):
 			match context.get_previous_token().type:
+				Token.Types.OPERATOR_NOT:
+					node = NotUnaryOperatorNode.new()
 				Token.Types.OPERATOR_ADDITION:
 					node = PositiveUnaryOperatorNode.new()
 				Token.Types.OPERATOR_SUBTRACTION:
 					node = NegativeUnaryOperatorNode.new()
-				Token.Types.OPERATOR_NOT:
-					node = NotUnaryOperatorNode.new()
 
 		if node:
-			node.with_child(parse_primary(context))
+			node.with_child(parse_secondary(context))
 			node.with_token(context.get_previous_token())
 		else:
-			node = parse_primary(context)
+			node = parse_secondary(context)
 
 		return node
 
+	func parse_secondary(context: ParserContext) -> ExpressionNode:
+		var node := parse_primary(context)
+		while context.match_type(Token.Types.ACCESSOR_PROPERTY):
+			node = (
+				PropertyAccessorNode.new()
+				.with_object(node)
+				.with_property(parse_literal_identifier(context))
+			)
+		return node
+	
 	func parse_primary(context: ParserContext) -> ExpressionNode:
 		if context.get_current_token().type == Token.Types.EXPRESSION_GROUP_OPENER:
 			context.consume_token()
