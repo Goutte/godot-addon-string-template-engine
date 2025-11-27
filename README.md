@@ -27,11 +27,9 @@ Disclaimer
 ----------
 
 The feature set of this addon is slim, as the addon is young,
-and none of the core devs have plans to push it towards its end goal.
+and none-one so far has plans to push it towards its end goal.
 
 We add what we need, when we can.  **Contributions are welcome.**
-
-> I actually started this for the puzzle.
 
 Features
 --------
@@ -61,14 +59,14 @@ Features
 - [ ] statements
 	- [x] print `{{ … }}`
 	- [x] if else `{% if … %} … {% else %} … {% endif %}`
-	- [ ] while
+	- [x] while `{% while … %} … {% endwhile %}`
 	- [ ] for
-	- [ ] set
+	- [x] set
 	- [ ] extends
 	- [ ] block
-	- [x] verbatim
+	- [x] verbatim (STILL BUGGY)
 - [ ] filters (see [Twig Filters](https://twig.symfony.com/doc/3.x/filters/index.html))
-	- [ ] abs
+	- [x] abs
 	- [ ] batch
 	- [ ] capitalize
 	- [ ] column
@@ -90,9 +88,6 @@ Features
 	- [ ] format_datetime
 	- [ ] format_number
 	- [ ] format_time
-	- [ ] html_to_markdown
-	- [ ] inline_css
-	- [ ] inky_to_html
 	- [ ] join
 	- [ ] json_encode
 	- [ ] keys
@@ -102,7 +97,6 @@ Features
 	- [ ] locale_name
 	- [x] lower / lowercase
 	- [ ] map
-	- [ ] markdown_to_html
 	- [ ] merge
 	- [ ] nl2br
 	- [ ] number_format

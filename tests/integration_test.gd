@@ -427,6 +427,26 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
+			&'rule': "Filter abs",
+			&'template': """
+			{{ 0 | abs }}
+			{{ 1 | abs }}
+			{{ 2.0 | abs }}
+			{{ -0 | abs }}
+			{{ -1 | abs }}
+			{{ -2.0 | abs }}
+			""",
+			&'variables': {},
+			&'expected': """
+			0
+			1
+			2.0
+			0
+			1
+			2.0
+			""",
+		},
+		{
 			&'rule': "Comments",
 			&'template': """
 			{#################################}
@@ -496,6 +516,38 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
+			&'rule': "Set statement",
+			&'template': """
+			{% set name = "poupou" %}
+			Hello {{ name }}!
+			{% set name = "pouloupi" %}
+			Hello {{ name }}!
+			""",
+			&'variables': {
+				&'name': "Escaper",
+			},
+			&'expected': """
+			
+			Hello poupou!
+			
+			Hello pouloupi!
+			""",
+		},
+		{
+			&'rule': "While statement",
+			&'template': """
+			{% set i = 5 %}
+			{% while i > 0 %}{{ i }}{% set i = i - 1 %}{% endwhile %}
+			""",
+			&'variables': {
+				&'name': "Escaper",
+			},
+			&'expected': """
+			
+			54321
+			""",
+		},
+		{
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
@@ -539,11 +591,7 @@ func test_a_bunch_of_rules() -> void:
 				#&'name': "verboten",
 			#},
 			#&'expected': """
-			#
-			#{% verbatim %}
-			#Hello {{  name  }}
-			#{% endverbatim %}
-			#
+			# ?
 			#""",
 		#},
 	]
