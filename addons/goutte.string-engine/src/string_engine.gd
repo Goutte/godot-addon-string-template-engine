@@ -857,13 +857,13 @@ class ExpressionsNode:
 	extends SyntaxNode
 
 
-class VariableIdentifierNode:
+class IdentifierLiteralNode:
 	extends ExpressionNode
 	@export var identifier: String
 
-	static func from_token(token: Token) -> VariableIdentifierNode:
+	static func from_token(token: Token) -> IdentifierLiteralNode:
 		assert(token.type == Token.Types.LITERAL_IDENTIFIER)
-		var node := VariableIdentifierNode.new()
+		var node := IdentifierLiteralNode.new()
 		node.identifier = token.literal
 		node.tokens.append(token)
 		return node
@@ -1383,7 +1383,7 @@ class SetStatementExtension:
 		)
 	
 	func serialize(context: VisitorContext, node: StatementNode) -> String:
-		var identifier = (node.children[0] as VariableIdentifierNode).identifier
+		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
 		var value = (node.children[1] as ExpressionNode).evaluate(context)
 		context.variables.set(identifier, value)
 		return ""
@@ -1870,8 +1870,8 @@ class Parser:
 		var token := context.consume_current_token()
 		match token.type:
 			Token.Types.LITERAL_IDENTIFIER:
-				return VariableIdentifierNode.from_token(token)
-				#return VariableIdentifierNode.new().with_identifier(token.literal).with_token(token) as VariableIdentifierNode
+				return IdentifierLiteralNode.from_token(token)
+				#return IdentifierLiteralNode.new().with_identifier(token.literal).with_token(token) as IdentifierLiteralNode
 			Token.Types.LITERAL_BOOLEAN_TRUE:
 				return BooleanLiteralNode.from_token(token, true)
 			Token.Types.LITERAL_BOOLEAN_FALSE:
@@ -1885,6 +1885,11 @@ class Parser:
 			_:
 				raise_error("Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
+
+	func parse_literal_identifier(context: ParserContext) -> ExpressionNode:
+		var token := context.consume_current_token()
+		assert(token.type == Token.Types.LITERAL_IDENTIFIER)
+		return IdentifierLiteralNode.from_token(token)
 
 	func raise_error(message: String):
 		printerr(message)
