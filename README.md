@@ -136,10 +136,13 @@ Features
 		- [x] clear all whitespaces `{%- … -%} {{- … -}}`
 	- [x] using engine options
 		- [x] clear a newline if right after a statement (opt-in)
+		- [x] clear a newline if right after a comment (opt-in)
+		- [x] clear a newline if right after a print (opt-in)
 - [ ] error handling
 	- [ ] allow a "no assert()" mode
 	- [ ] test error handling
 	- [ ] show where in the template
+- [ ] auto-escaping configuration
 - [ ] localization utils
 - [ ] syntax highlighting
 
@@ -148,8 +151,24 @@ Usage Example
 -------------
 
 ```gdscript
-# TODO (meanwhile, see tests)
+
+# Instantiate the string engine
+var string_engine := StringEngine.new()
+
+# Configure the string engine however you desire (like Twig, in this example)
+string_engine.clear_newline_after_statement = true
+string_engine.clear_newline_after_comment = true
+
+# Render a template with some variables
+var out: String = string.engine.render(
+	"Hello {% if name %}{{ name | uppercase }}{% else %}World{% endif %}!",
+	{ &'name': "Godette" },
+)
+assert(out == "Hello Godette!")
 ```
+
+> This is not a very enticing template example.
+> TODO: let's give another, more useful example
 
 
 Install

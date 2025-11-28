@@ -658,7 +658,7 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
-			&'rule': "Clear whitespaces like in Twig",
+			&'rule': "Option to clear whitespaces like in Twig",
 			&'template': """
 			Primes:
 			
@@ -670,13 +670,55 @@ func test_a_bunch_of_rules() -> void:
 				&'numbers': [2, 3, 5],
 			},
 			&'configure': func(se: StringEngine):
-				se.clear_statement_newline_suffix = true,
+				se.clear_newline_after_comment = true
+				se.clear_newline_after_statement = true,
 			&'expected': """
 			Primes:
 			
 			2
 			3
 			5
+			""",
+		},
+		{
+			&'rule': "Option to clear a newline after comments and statements",
+			&'template': """
+			Lots:
+			{#~ I am a comment #}
+			{%~ set n = 999 %}
+			{#~ I am another comment,
+			and I am multiline !!! #}
+			{%~ if n == 999 %}
+			{{ n }}
+			{%~ endif %}
+			""",
+			&'variables': {},
+			&'configure': func(se: StringEngine):
+				se.clear_newline_after_comment = true
+				se.clear_newline_after_statement = true,
+			&'expected': """
+			Lots:
+			999
+			""",
+		},
+		{
+			&'rule': "Option to clear a newline after echo",
+			&'template': """
+			{{ 7 }}
+
+			{{ 7 }}
+
+			{{ 7 }}
+
+			""",
+			&'variables': {},
+			&'configure': func(se: StringEngine):
+				se.clear_newline_after_echo = true
+				,
+			&'expected': """
+			7
+			7
+			7
 			""",
 		},
 		#{

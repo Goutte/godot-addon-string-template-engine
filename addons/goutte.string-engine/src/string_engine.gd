@@ -6,37 +6,37 @@ extends RefCounted
 # WHY: Useful to generate shaders, dynamic dialogues, maybe HTML…
 # SLOW: try the fast Ginja addon using a gdextension to wrap Inja.
 
-## Experimental ; might not stay.
-var clear_statement_lines := false
-
-## Clear a newline if it immediately follows a statement.
-var clear_statement_newline_suffix := false
+## Clear a single newline if it immediately follows a statement.
+var clear_newline_after_statement := false
+## Clear a single newline if it immediately follows a comment.
+var clear_newline_after_comment := false
+## Clear a single newline if it immediately follows a print.
+var clear_newline_after_echo := false
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
 ## Your best bet is to look at and copy existing extensions.
 var statement_extensions: Array[StatementExtension] = [
+	ForStatementExtension.new(),
 	IfElseStatementExtension.new(),
 	SetStatementExtension.new(),
-	WhileStatementExtension.new(),
-	ForStatementExtension.new(),
 	VerbatimStatementExtension.new(),
+	WhileStatementExtension.new(),
 ]
 
 ## Filter extensions used by the engine.
 ## You can append your own in here before calling render(…).
 ## Your best bet is to look at and copy existing extensions.
 var filter_extensions: Array[FilterExtension] = [
+	AbsFilterExtension.new(),
 	LowerFilterExtension.new(),
 	LowercaseFilterExtension.new(),
 	UpperFilterExtension.new(),
 	UppercaseFilterExtension.new(),
-	AbsFilterExtension.new(),
 ]
 
 
 #region Data Structures
-
 
 ## A basic (and quite inefficient) view on a portion of a string.
 ## The goal was/is to copy less strings.
@@ -44,7 +44,7 @@ var filter_extensions: Array[FilterExtension] = [
 ## Not when shrinking though, so it's still worth having this I think.
 class StringView:
 	extends Resource
-	# Private variables with reserved words; hence ugly dunders
+	# Private variables and reserved words; hence the dunders.
 	@export_storage var __string: String  # immutable whole string
 	@export_storage var __start: int
 	@export_storage var __length: int
@@ -111,6 +111,7 @@ class StringView:
 		#return self.tokens[self.cursor - 1]
 	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
+
 #endregion
 
 
@@ -200,7 +201,9 @@ class Tokenizer:
 	}
 
 	# Public configuration
-	var clear_statement_newline_suffix := false
+	var clear_newline_after_statement := false
+	var clear_newline_after_comment := false
+	var clear_newline_after_echo := false
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
 	var symbol_echo_opener := '{{'
@@ -259,15 +262,17 @@ class Tokenizer:
 	var integer_literal_regex: RegEx
 	var float_literal_regex: RegEx
 	var string_literal_regex: RegEx
+	var whitespaces_regex: RegEx
 	var openers_regex: RegEx
 	var echo_closer_regex: RegEx
-	var statement_closer_regex: RegEx
 	var comment_closer_regex: RegEx
+	var statement_closer_regex: RegEx
 
 	# Line start anchor breaks with regex's search offset, yet we use a StringView.
 	# We might want to get rid of it and switch to solution B ; depends on the benchmarks.
 	# A: keep it, keep searching on a substr (copy!) of source on each token (we're doing it)
 	# B: remove it, use the search offset, hope regex is fast (feels like it'll scale worse)
+	# C: find a satisfying tertium quid
 	const LINE_START_ANCHOR := "^"
 
 	func reset_regexes():
@@ -275,30 +280,30 @@ class Tokenizer:
 
 		self.identifier_literal_regex = RegEx.new()
 		has_compiled = self.identifier_literal_regex.compile(
-			LINE_START_ANCHOR +
-			"[a-zA-Z_][a-zA-Z0-9_]*"  # Safe, but ASCII only
-			#"[\\w_][\\w0-9_]*"  # Nope: \w includes numbers and \L is absent
+			LINE_START_ANCHOR
+			+ "[a-zA-Z_][a-zA-Z0-9_]*"  # Safe, but ASCII only
+			#+ "[\\w_][\\w0-9_]*"  # Nope: \w includes numbers and \L is absent
 		)
 		assert(has_compiled == OK, "Detection of variable identifiers broke.")
 
 		self.integer_literal_regex = RegEx.new()
 		has_compiled = self.integer_literal_regex.compile(
-			LINE_START_ANCHOR +
-			"[0-9]+"
+			LINE_START_ANCHOR
+			+ "[0-9]+"
 			# TODO: support 0xff and 0b101010
 		)
 		assert(has_compiled == OK, "Numbers must be ßr0k3n")
 
 		self.float_literal_regex = RegEx.new()
 		has_compiled = self.float_literal_regex.compile(
-			LINE_START_ANCHOR +
-			"(?:" +
-			"\\d+\\.\\d*e\\d+" +   # 1.618e3
-			"|\\d*\\.\\d+e\\d+" +  # .333e10
-			"|\\d+e\\d+" +         # 3e9
-			"|\\d+\\.\\d*" +       # 2.7 or 2.
-			"|\\.\\d+" +           # .2
-			")"
+			LINE_START_ANCHOR
+			+ "(?:"
+			+ "\\d+\\.\\d*e\\d+"   # 1.618e3
+			+ "|\\d*\\.\\d+e\\d+"  # .333e10
+			+ "|\\d+e\\d+"         # 3e9
+			+ "|\\d+\\.\\d*"       # 2.7 or 2.
+			+ "|\\.\\d+"           # .2
+			+ ")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
 
@@ -312,6 +317,13 @@ class Tokenizer:
 			("%s" % quote)
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
+
+		self.whitespaces_regex = RegEx.new()
+		has_compiled = self.whitespaces_regex.compile(
+			LINE_START_ANCHOR
+			+ "[\\s]+"
+		)
+		assert(has_compiled == OK, "")
 
 		self.openers_regex = RegEx.new()
 		has_compiled = self.openers_regex.compile(
@@ -460,7 +472,7 @@ class Tokenizer:
 
 			consume_source(whole_match.length())
 
-	## Advances until it finds a content closer symbol.
+	## Consumes until it finds a content closer symbol.
 	func tokenize_comment_content() -> void:
 		var closer_match := source_view.rsearch_start(comment_closer_regex)
 		if null == closer_match:
@@ -475,11 +487,14 @@ class Tokenizer:
 			consume_source(match_start)
 
 	func tokenize_echo_closer() -> Error:
-		return tokenize_closer(
+		var status := tokenize_closer(
 			self.symbol_echo_closer,
 			Token.Types.ECHO_CLOSER,
 			self.echo_closer_regex,
 		)
+		if status == OK and self.clear_newline_after_echo:
+			mark_next_newline_for_clearing()
+		return status
 
 	func tokenize_statement_closer() -> Error:
 		var status := tokenize_closer(
@@ -487,17 +502,23 @@ class Tokenizer:
 			Token.Types.STATEMENT_CLOSER,
 			self.statement_closer_regex,
 		)
-		if status == OK and self.clear_statement_newline_suffix:
+		if status == OK and self.clear_newline_after_statement:
 			mark_next_newline_for_clearing()
 		return status
 
 	func tokenize_comment_closer() -> Error:
-		return tokenize_closer(
+		var status := tokenize_closer(
 			self.symbol_comment_closer,
 			Token.Types.COMMENT_CLOSER,
 			self.comment_closer_regex,
 		)
+		if status == OK and self.clear_newline_after_comment:
+			mark_next_newline_for_clearing()
+		return status
 
+	func scan_regex(closer_regex: RegEx) -> bool:
+		return null != self.source_view.rsearch_start(closer_regex)
+	
 	func tokenize_closer(
 		symbol: String,           ## closer symbol to look for
 		token_type: Token.Types,  ## token type to create
@@ -563,14 +584,17 @@ class Tokenizer:
 		return tokenized_at_least_once
 
 	func tokenize_expression_once() -> Error:
+		# The closer symbols may start with characters that are valid expression
+		# characters such as %, ~ or -.  Or some other, if they're customized.
+		# Therefore, we need this expensive forward scan for closer symbols.
+		if (
+			scan_regex(self.statement_closer_regex) or
+			scan_regex(self.echo_closer_regex)
+		):
+			return ERR_OUT_OF_MEMORY
+		
 		# Goal: ordered by decreasing usage, yet respecting special precedences
 		# This goal will never be achieved and will require serious benchmarking
-		if self.source_view.begins_with(self.symbol_statement_closer):
-			return ERR_CANT_OPEN
-		if self.source_view.begins_with(self.symbol_clear_whitespace + self.symbol_statement_closer):
-			return ERR_CANT_OPEN
-		if self.source_view.begins_with(self.symbol_clear_line_whitespace + self.symbol_statement_closer):
-			return ERR_CANT_OPEN
 		if tokenize_literal_boolean() == OK: return OK  # before identifier
 		if tokenize_literal_float() == OK: return OK  # before integer
 		if tokenize_literal_integer() == OK: return OK
@@ -631,11 +655,13 @@ class Tokenizer:
 			self.symbol_infix_in,
 			Token.Types.INFIX_IN,
 		)
+
 	func tokenize_accessor_property() -> Error:
 		return tokenize_symbol(
 			self.symbol_accessor_property,
 			Token.Types.ACCESSOR_PROPERTY,
 		)
+
 	func tokenize_statement_assign() -> Error:
 		return tokenize_symbol(
 			self.symbol_statement_assign,
@@ -785,7 +811,6 @@ class Tokenizer:
 			var previous_token := self.tokens[-1]
 			if previous_token.clear_newline_after:
 				if literal.begins_with("\n"):
-					#prints("Removing a newline after `%s` in `%s`" % [previous_token, literal])
 					literal = literal.substr(1)
 				elif literal.begins_with("\r\n"):
 					literal = literal.substr(2)
@@ -795,28 +820,6 @@ class Tokenizer:
 				literal = literal.rstrip("\r\n\t ")
 		add_token(Token.Types.RAW_DATA, literal)
 
-	func consume_whitespaces_into_previous_token() -> void:
-		assert(not self.tokens.is_empty())
-		var consumed_whitespaces := consume_whitespaces()
-		self.tokens[-1].whitespaces_after += consumed_whitespaces
-
-	func consume_whitespaces() -> String:
-		var regex_compiled: int
-		var whitespaces_regex := RegEx.new()
-		regex_compiled = whitespaces_regex.compile(
-			"^[\\s]+"
-		)
-		if regex_compiled != OK:
-			breakpoint  # regex broke ; dev intrigued
-			return ""
-
-		var whitespaces_match := self.source_view.rsearch_start(whitespaces_regex)
-		if whitespaces_match != null:
-			consume_source(whitespaces_match.get_string().length())
-			return whitespaces_match.get_string()
-
-		return ""
-
 	func consume_source(amount: int) -> void:
 		assert(amount >= 0, "Cannot consume a source negatively. … For now.")
 		if amount < 0:
@@ -824,8 +827,19 @@ class Tokenizer:
 		if amount == 0:  # just to see if/when that happens, remove me at will
 			breakpoint
 			return
-
 		self.source_view.shrink_from_start_by(amount)
+
+	func consume_whitespaces() -> String:
+		var whitespaces_match := self.source_view.rsearch_start(whitespaces_regex)
+		if null != whitespaces_match:
+			consume_source(whitespaces_match.get_string().length())
+			return whitespaces_match.get_string()
+		return ""
+
+	func consume_whitespaces_into_previous_token() -> void:
+		assert(not self.tokens.is_empty())
+		var consumed_whitespaces := consume_whitespaces()
+		self.tokens[-1].whitespaces_after += consumed_whitespaces
 
 	func raise_error(message: String) -> void:
 		printerr(message)
@@ -2117,7 +2131,9 @@ class EvaluatorVisitor:
 func render(source: String, variables: Dictionary) -> String:
 
 	var tokenizer := Tokenizer.new()
-	tokenizer.clear_statement_newline_suffix = self.clear_statement_newline_suffix
+	tokenizer.clear_newline_after_statement = self.clear_newline_after_statement
+	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
+	tokenizer.clear_newline_after_echo = self.clear_newline_after_echo
 	var tokens := tokenizer.tokenize(source)
 
 	var parser := Parser.new()
