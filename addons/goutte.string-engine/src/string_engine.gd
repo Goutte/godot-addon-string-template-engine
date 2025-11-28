@@ -29,6 +29,7 @@ var statement_extensions: Array[StatementExtension] = [
 ## Your best bet is to look at and copy existing extensions.
 var filter_extensions: Array[FilterExtension] = [
 	AbsFilterExtension.new(),
+	CapitalizeFilterExtension.new(),
 	LowerFilterExtension.new(),
 	LowercaseFilterExtension.new(),
 	UpperFilterExtension.new(),
@@ -1309,6 +1310,24 @@ class FilterExtension:
 		return id_to_match == get_identifier()
 
 
+## Converts to absolute value, like Godot's abs().
+class AbsFilterExtension:
+	extends FilterExtension
+	func get_identifier() -> String:	return 'abs'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		return abs(node.subject.evaluate(context))
+
+
+## Capitalizes the subject.
+class CapitalizeFilterExtension:
+	extends FilterExtension
+	func get_identifier() -> String:	return 'capitalize'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		return str(node.subject.evaluate(context)).capitalize()
+
+
 ## Converts the subject to uppercase.
 class UppercaseFilterExtension:
 	extends FilterExtension
@@ -1337,16 +1356,6 @@ class LowercaseFilterExtension:
 class LowerFilterExtension:
 	extends LowercaseFilterExtension
 	func get_identifier() -> String:	return 'lower'
-
-
-## Converts to absolute value, like Godot's abs().
-class AbsFilterExtension:
-	extends FilterExtension
-	func get_identifier() -> String:	return 'abs'
-
-	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
-		return abs(node.subject.evaluate(context))
-
 
 #endregion
 

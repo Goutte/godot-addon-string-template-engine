@@ -471,6 +471,24 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
+			&'rule': "Filter capitalize",
+			&'template': """
+			{{ "" | capitalize }}
+			{{ "paris" | capitalize }}
+			{{ "BERLIN" | capitalize }}
+			{{ "ElSalvador" | capitalize }}
+			{{ "Saint-Louis du Senegal" | capitalize }}
+			""",
+			&'variables': {},
+			&'expected': """
+			
+			Paris
+			Berlin
+			El Salvador
+			Saint Louis Du Senegal
+			""",
+		},
+		{
 			&'rule': "Comments",
 			&'template': """
 			{#################################}

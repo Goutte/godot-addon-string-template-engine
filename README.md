@@ -31,6 +31,31 @@ and none-one so far has plans to push it towards its end goal.
 
 We add what we need, when we can.  **Contributions are welcome.**
 
+
+Usage Example
+-------------
+
+```gdscript
+
+# Instantiate the string engine
+var string_engine := StringEngine.new()
+
+# Configure the string engine however you desire (like Twig, in this example)
+string_engine.clear_newline_after_statement = true
+string_engine.clear_newline_after_comment = true
+
+# Render a template with some variables
+var out: String = string.engine.render(
+	"Hello {% if name %}{{ name | uppercase }}{% else %}World{% endif %}!",
+	{ &'name': "Godette" },
+)
+assert(out == "Hello Godette!")
+```
+
+> This is not a very enticing template example.
+> TODO: let's give another, more useful example
+
+
 Features
 --------
 
@@ -78,7 +103,7 @@ Features
 - [ ] filters (see [Twig Filters](https://twig.symfony.com/doc/3.x/filters/index.html))
 	- [x] abs
 	- [ ] batch
-	- [ ] capitalize
+	- [x] capitalize
 	- [ ] column
 	- [ ] convert_encoding
 	- [ ] country_name
@@ -133,7 +158,7 @@ Features
 - [x] whitespace handling
 	- [x] using delimiters
 		- [x] clear spaces and tabs on the same line `{%~ … ~%} {{~ … ~}}`
-		- [x] clear all whitespaces `{%- … -%} {{- … -}}`
+		- [x] clear whitespaces including newlines `{%- … -%} {{- … -}}`
 	- [x] using engine options
 		- [x] clear a newline if right after a statement (opt-in)
 		- [x] clear a newline if right after a comment (opt-in)
@@ -145,30 +170,6 @@ Features
 - [ ] auto-escaping configuration
 - [ ] localization utils
 - [ ] syntax highlighting
-
-
-Usage Example
--------------
-
-```gdscript
-
-# Instantiate the string engine
-var string_engine := StringEngine.new()
-
-# Configure the string engine however you desire (like Twig, in this example)
-string_engine.clear_newline_after_statement = true
-string_engine.clear_newline_after_comment = true
-
-# Render a template with some variables
-var out: String = string.engine.render(
-	"Hello {% if name %}{{ name | uppercase }}{% else %}World{% endif %}!",
-	{ &'name': "Godette" },
-)
-assert(out == "Hello Godette!")
-```
-
-> This is not a very enticing template example.
-> TODO: let's give another, more useful example
 
 
 Install
