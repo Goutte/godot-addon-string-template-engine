@@ -130,10 +130,12 @@ Features
 	- [ ] u
 	- [x] upper / uppercase
 	- [ ] url_encode
-- [ ] whitespace handling
-	- [ ] using delimiters `{{- -}} {{~ ~}}`
-	- [ ] using engine options
-		- [ ] clear lines of whitespaces due to statements
+- [x] whitespace handling
+	- [x] using delimiters
+		- [x] clear spaces and tabs on the same line `{%~ … ~%} {{~ … ~}}`
+		- [x] clear all whitespaces `{%- … -%} {{- … -}}`
+	- [x] using engine options
+		- [x] clear a newline if right after a statement (opt-in)
 - [ ] error handling
 	- [ ] allow a "no assert()" mode
 	- [ ] test error handling

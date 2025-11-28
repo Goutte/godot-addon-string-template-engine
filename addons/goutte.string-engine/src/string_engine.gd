@@ -3,8 +3,14 @@
 class_name StringEngine
 extends RefCounted
 
-# WHY: Useful to generate shaders, dynamic dialogues, maybe HTML pages…
+# WHY: Useful to generate shaders, dynamic dialogues, maybe HTML…
 # SLOW: try the fast Ginja addon using a gdextension to wrap Inja.
+
+## Experimental ; might not stay.
+var clear_statement_lines := false
+
+## Clear a newline if it immediately follows a statement.
+var clear_statement_newline_suffix := false
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
@@ -27,6 +33,9 @@ var filter_extensions: Array[FilterExtension] = [
 	UppercaseFilterExtension.new(),
 	AbsFilterExtension.new(),
 ]
+
+
+#region Data Structures
 
 
 ## A basic (and quite inefficient) view on a portion of a string.
@@ -102,6 +111,7 @@ class StringView:
 		#return self.tokens[self.cursor - 1]
 	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
+#endregion
 
 
 #region Tokenization
@@ -129,7 +139,7 @@ class Token:
 		EXPRESSIONS_SEPARATOR,    ## ,
 		ACCESSOR_PROPERTY,        ## .
 		FILTER,                   ## |
-		LITERAL_IDENTIFIER,       ## ^[0-9a-z_]+$  (roughly)
+		LITERAL_IDENTIFIER,       ## ^[0-9a-zA-Z_]+$  (roughly)
 		LITERAL_BOOLEAN_TRUE,     ## true
 		LITERAL_BOOLEAN_FALSE,    ## false
 		LITERAL_INTEGER,          ## 42
@@ -159,6 +169,11 @@ class Token:
 	@export var literal := ""
 	@export var whitespaces_before := ""
 	@export var whitespaces_after := ""
+	
+	# TODO: wouldn't it be faster/better to host these toggles in the tokenizer?
+	var clear_newline_after := false
+	var clear_whitespaces_after := false
+	var clear_tabspaces_after := false
 
 	func with_type(value: Types) -> Token:
 		self.type = value
@@ -185,6 +200,7 @@ class Tokenizer:
 	}
 
 	# Public configuration
+	var clear_statement_newline_suffix := false
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
 	var symbol_echo_opener := '{{'
@@ -404,20 +420,30 @@ class Tokenizer:
 
 		if null == openers_match:
 			# No opener found, we can consume as raw data 'til the end
-			add_token(Token.Types.RAW_DATA, source_remaining)
+			add_raw_data_token(source_remaining)
 			consume_source(source_remaining.length())
+		
 		else:
 			# Let's consume any potential raw data before the opener
 			var match_start := openers_match.get_start()
 			if match_start > 0:
 				var raw_data_contents := source_remaining.substr(0, match_start)
-				add_token(Token.Types.RAW_DATA, raw_data_contents)
+				add_raw_data_token(raw_data_contents)
 				consume_source(match_start)
 
-			# And finally we can consume the opener
+			# Finally we can consume the opener
 			var whole_match := openers_match.get_string()
 			var opener_symbol := openers_match.get_string(&'symbol')
-			var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')  # TODO
+			var clear_whitespace_symbol := openers_match.get_string(&'clear_whitespace')
+			
+			# And perhaps clear previous whitespaces
+			if clear_whitespace_symbol and not self.tokens.is_empty():
+				var previous_token := self.tokens[-1]
+				if previous_token.type == Token.Types.RAW_DATA:
+					previous_token.literal = previous_token.literal.rstrip(
+						" \t" +
+						("\r\n" if clear_whitespace_symbol == '-' else '')
+					)
 
 			match opener_symbol:
 				symbol_echo_opener:
@@ -443,29 +469,30 @@ class Tokenizer:
 			])
 		else:
 			var match_start := closer_match.get_start()
-			#var closer_symbol := closer_match.get_string(&'symbol')
-			#var clear_whitespace_symbol := closer_match.get_string(&'clear_whitespace')
 			var source_remaining := source_view.get_as_string()
 			var comment_contents := source_remaining.substr(0, match_start)
 			add_token(Token.Types.COMMENT_CONTENT, comment_contents)
 			consume_source(match_start)
 
-	func tokenize_echo_closer() -> void:
-		tokenize_closer(
+	func tokenize_echo_closer() -> Error:
+		return tokenize_closer(
 			self.symbol_echo_closer,
 			Token.Types.ECHO_CLOSER,
 			self.echo_closer_regex,
 		)
 
-	func tokenize_statement_closer() -> void:
-		tokenize_closer(
+	func tokenize_statement_closer() -> Error:
+		var status := tokenize_closer(
 			self.symbol_statement_closer,
 			Token.Types.STATEMENT_CLOSER,
 			self.statement_closer_regex,
 		)
+		if status == OK and self.clear_statement_newline_suffix:
+			mark_next_newline_for_clearing()
+		return status
 
-	func tokenize_comment_closer() -> void:
-		tokenize_closer(
+	func tokenize_comment_closer() -> Error:
+		return tokenize_closer(
 			self.symbol_comment_closer,
 			Token.Types.COMMENT_CLOSER,
 			self.comment_closer_regex,
@@ -475,22 +502,46 @@ class Tokenizer:
 		symbol: String,           ## closer symbol to look for
 		token_type: Token.Types,  ## token type to create
 		closer_regex: RegEx,      ## compiled regex to match
-	) -> void:
-		var close_match := self.source_view.rsearch_start(closer_regex)
-		if close_match == null:
+	) -> Error:
+		var closer_match := self.source_view.rsearch_start(closer_regex)
+		if closer_match == null:
 			raise_error("Expected closer token `%s`, got `%s` instead." % [
 				symbol,
 				self.source_view.read_character_at(0) +
 				self.source_view.read_character_at(1)
 			])
 			consume_source(self.source_view.length())  # l∞p prevention
+			return ERR_INVALID_DATA
 		else:
-			var whole_match := close_match.get_string()
-			var closer_symbol := close_match.get_string(&'symbol')
+			var whole_match := closer_match.get_string()
+			var closer_symbol := closer_match.get_string(&'symbol')
 			assert(closer_symbol == symbol)
-			var clear_whitespace_symbol := close_match.get_string(&'clear_whitespace')
+			var clear_whitespace_symbol := closer_match.get_string(&'clear_whitespace')
+			
 			add_token(token_type, whole_match)
 			consume_source(whole_match.length())
+			
+			# TBD Is this faster or slower than match ?
+			if clear_whitespace_symbol.is_empty():
+				pass  # nothing is cool
+			elif clear_whitespace_symbol == self.symbol_clear_line_whitespace:
+				mark_next_tabspaces_for_clearing()
+			elif clear_whitespace_symbol == self.symbol_clear_whitespace:
+				mark_next_whitespaces_for_clearing()
+			
+			return OK
+
+	func mark_next_newline_for_clearing() -> void:
+		if not self.tokens.is_empty():
+			self.tokens[-1].clear_newline_after = true
+	
+	func mark_next_whitespaces_for_clearing() -> void:
+		if not self.tokens.is_empty():
+			self.tokens[-1].clear_whitespaces_after = true
+	
+	func mark_next_tabspaces_for_clearing() -> void:
+		if not self.tokens.is_empty():
+			self.tokens[-1].clear_tabspaces_after = true
 
 	func tokenize_statement_identifier() -> void:
 		var regex_match := self.source_view.rsearch_start(identifier_literal_regex)
@@ -513,7 +564,13 @@ class Tokenizer:
 
 	func tokenize_expression_once() -> Error:
 		# Goal: ordered by decreasing usage, yet respecting special precedences
-		# This goal is not yet achieved and will require serious benchmarking
+		# This goal will never be achieved and will require serious benchmarking
+		if self.source_view.begins_with(self.symbol_statement_closer):
+			return ERR_CANT_OPEN
+		if self.source_view.begins_with(self.symbol_clear_whitespace + self.symbol_statement_closer):
+			return ERR_CANT_OPEN
+		if self.source_view.begins_with(self.symbol_clear_line_whitespace + self.symbol_statement_closer):
+			return ERR_CANT_OPEN
 		if tokenize_literal_boolean() == OK: return OK  # before identifier
 		if tokenize_literal_float() == OK: return OK  # before integer
 		if tokenize_literal_integer() == OK: return OK
@@ -722,6 +779,21 @@ class Tokenizer:
 
 	func add_token(type: Token.Types, literal: String) -> void:
 		self.tokens.append(Token.new().with_type(type).with_literal(literal))
+	
+	func add_raw_data_token(literal: String) -> void:
+		if not self.tokens.is_empty():
+			var previous_token := self.tokens[-1]
+			if previous_token.clear_newline_after:
+				if literal.begins_with("\n"):
+					#prints("Removing a newline after `%s` in `%s`" % [previous_token, literal])
+					literal = literal.substr(1)
+				elif literal.begins_with("\r\n"):
+					literal = literal.substr(2)
+			if previous_token.clear_tabspaces_after:
+				literal = literal.rstrip("\t ")
+			if previous_token.clear_whitespaces_after:
+				literal = literal.rstrip("\r\n\t ")
+		add_token(Token.Types.RAW_DATA, literal)
 
 	func consume_whitespaces_into_previous_token() -> void:
 		assert(not self.tokens.is_empty())
@@ -2019,6 +2091,13 @@ class VisitorContext:
 	var variables := {}
 
 
+## Cleans up the syntax tree ?
+class JanitorVisitor:
+	extends RefCounted
+	func visit(_tree: SyntaxTree) -> void:
+		pass
+
+
 ## Outputs the serialized template with variables replaced and logic applied.
 class EvaluatorVisitor:
 	extends RefCounted
@@ -2038,15 +2117,19 @@ class EvaluatorVisitor:
 func render(source: String, variables: Dictionary) -> String:
 
 	var tokenizer := Tokenizer.new()
+	tokenizer.clear_statement_newline_suffix = self.clear_statement_newline_suffix
 	var tokens := tokenizer.tokenize(source)
 
 	var parser := Parser.new()
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)
-
+	
 	var visitor_context := VisitorContext.new()
-	visitor_context.variables = variables
+	visitor_context.variables = variables.duplicate()
+
+	#var cleaner_visitor := JanitorVisitor.new()
+	#cleaner_visitor.visit(syntax_tree)
 
 	var visitor := EvaluatorVisitor.new()
 	var output := visitor.visit(syntax_tree, visitor_context)

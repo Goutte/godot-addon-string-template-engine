@@ -584,6 +584,119 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
+			&'rule': "Clear spaces and tabs before statements with ~",
+			&'template': """
+			{%~ for i in numbers %}
+			{{ i }}
+			{%~ endfor %}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5],
+			},
+			&'expected': """
+
+			2
+
+			3
+
+			5
+
+			""",
+		},
+		{
+			&'rule': "Clear all whitespaces before statements with -",
+			&'template': """
+			Primes:
+			
+			{%- for i in numbers %}
+			{{ i }}
+			
+
+			{%- endfor %}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5],
+			},
+			&'expected': """
+			Primes:
+			2
+			3
+			5
+			""",
+		},
+		{
+			&'rule': "Clear spaces and tabs after statements with ~",
+			&'template': """
+			Primes:
+			{% for i in numbers ~%}     	 	{{ i }} {% endfor %}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5],
+			},
+			&'expected': """
+			Primes:
+			2 3 5 
+			""",
+		},
+		{
+			&'rule': "Clear all whitespaces after statements with -",
+			&'template': """
+			Primes:
+			{% for i in numbers -%}
+			
+			{{ i }}
+			{% endfor -%}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5],
+			},
+			&'expected': """
+			Primes:
+			2
+			3
+			5
+			""",
+		},
+		{
+			&'rule': "Clear whitespaces like in Twig",
+			&'template': """
+			Primes:
+			
+			{%~ for i in numbers %}
+			{{ i }}
+			{%~ endfor %}
+			""",
+			&'variables': {
+				&'numbers': [2, 3, 5],
+			},
+			&'configure': func(se: StringEngine):
+				se.clear_statement_newline_suffix = true,
+			&'expected': """
+			Primes:
+			
+			2
+			3
+			5
+			""",
+		},
+		#{
+			#&'rule': "Optionally, clear lines with only one silent statement",
+			#&'template': """
+			#{% for i in numbers %}
+			#{{ i }}
+			#{% endfor %}
+			#""",
+			#&'variables': {
+				#&'numbers': [2, 3, 5],
+			#},
+			#&'configure': func(se: StringEngine): se.clear_statement_lines = true,
+			#&'expected': """
+			#2
+			#3
+			#5
+			#""",
+		#},
+		{
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
@@ -631,8 +744,10 @@ func test_a_bunch_of_rules() -> void:
 			#""",
 		#},
 	]
-	var engine := StringEngine.new()
 	for datum: Dictionary in data:
+		var engine := StringEngine.new()
+		var configure: Callable = datum.get(&'configure', func(_se: StringEngine): return)
+		configure.call(engine)
 		var expected: String = datum[&'expected']
 		var actual: String = engine.render(datum[&'template'], datum[&'variables'])
 		print("\t* %s" % [datum[&'rule']])
