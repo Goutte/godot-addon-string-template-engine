@@ -9,12 +9,13 @@ func assert_equals(expected: Variant, actual: Variant, message := "") -> void:
 Assertion of equality failed !
 %s
 Expected:
-
+------------------------------
 %s
-
+------------------------------
 but got:
-
+------------------------------
 %s
+------------------------------
 
 """ % [message, expected, actual]
 	printerr(message)

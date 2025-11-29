@@ -130,13 +130,17 @@ func test_a_bunch_of_rules() -> void:
 			&'template': """
 			0{{ 11 }}0
 			0{{ 011 }}0
-			0{{ 0 }}0
+			0{{ 00 }}0
+			{{ 0xff3399 }}
+			{{ 0b101010 }}
 			""",
 			&'variables': {},
 			&'expected': """
 			0110
 			0110
 			000
+			16724889
+			42
 			""",
 		},
 		{
@@ -309,35 +313,34 @@ func test_a_bunch_of_rules() -> void:
 			-10
 			""",
 		},
-		# NOTE: Nah, can't keep LL(1) with the default set of delimiters
-		#{
-			#&'rule': "Modulo of integers",
-			#&'template': """
-			#{{ 20 % 3 }}
-			#{{ -20 % 3 }}
-			#{{ 20 % -3 }}
-			#""",
-			#&'variables': {},
-			#&'expected': """
-			#2
-			#-2
-			#2
-			#""",
-		#},
-		#{
-			#&'rule': "Modulo of floats",
-			#&'template': """
-			#{{ 10.1 % 3.3 }}
-			#{{ 20.125 % 3 }}
-			#{{ 10 % 3.3 }}
-			#""",
-			#&'variables': {},
-			#&'expected': """
-			#0.2
-			#2.125
-			#0.1
-			#""",
-		#},
+		{
+			&'rule': "Modulo of integers",
+			&'template': """
+			{{ 20 % 3 }}
+			{{ -20 % 3 }}
+			{{ 20 % -3 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			2
+			-2
+			2
+			""",
+		},
+		{
+			&'rule': "Modulo of floats",
+			&'template': """
+			{{ 10.1 % 3.3 }}
+			{{ 20.125 % 3 }}
+			{{ 10 % 3.3 }}
+			""",
+			&'variables': {},
+			&'expected': """
+			0.2
+			2.125
+			0.1
+			""",
+		},
 		{
 			&'rule': "Multiline arithmetic",
 			&'template': """
@@ -429,7 +432,7 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
-			&'rule': "Filters",
+			&'rule': "Filters for uppercase and lowercase",
 			&'template': """
 			{{ "yoLo" | uppercase }}
 			{{ "YoLo" | upper }}
@@ -438,6 +441,7 @@ func test_a_bunch_of_rules() -> void:
 			{{ "YoLo" | lower | upper }}
 			{{"YoLo"|upper|lower}}
 			{{ "ÆÛŒÉÈÇÀ" | lower }}
+			{{ false | upper }}
 			""",
 			&'variables': {},
 			&'expected': """
@@ -448,6 +452,7 @@ func test_a_bunch_of_rules() -> void:
 			YOLO
 			yolo
 			æûœéèçà
+			FALSE
 			""",
 		},
 		{
@@ -478,6 +483,8 @@ func test_a_bunch_of_rules() -> void:
 			{{ "BERLIN" | capitalize }}
 			{{ "ElSalvador" | capitalize }}
 			{{ "Saint-Louis du Senegal" | capitalize }}
+			{{ 666 | capitalize }}
+			{{ true | capitalize }}
 			""",
 			&'variables': {},
 			&'expected': """
@@ -486,6 +493,8 @@ func test_a_bunch_of_rules() -> void:
 			Berlin
 			El Salvador
 			Saint Louis Du Senegal
+			666
+			True
 			""",
 		},
 		{
@@ -805,12 +814,12 @@ func test_a_bunch_of_rules() -> void:
 		#},
 	]
 	for datum: Dictionary in data:
+		print("\t* %s" % [datum.get(&'rule', "<unnamed rule>")])
 		var engine := StringEngine.new()
 		var configure: Callable = datum.get(&'configure', func(_se: StringEngine): return)
 		configure.call(engine)
 		var expected: String = datum[&'expected']
 		var actual: String = engine.render(datum[&'template'], datum[&'variables'])
-		print("\t* %s" % [datum[&'rule']])
 		assert_equals(expected, actual, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
 			datum[&'rule'],
 			datum[&'template'],

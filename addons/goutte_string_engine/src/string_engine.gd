@@ -151,7 +151,7 @@ class Token:
 		OPERATOR_SUBTRACTION,     ## -
 		OPERATOR_MULTIPLICATION,  ## *
 		OPERATOR_DIVISION,        ## /
-		#OPERATOR_MODULO,          ## %  Removed: conflicts with STATEMENT_CLOSER ; we use filters
+		OPERATOR_MODULO,          ## %  TODO Removed: conflicts with STATEMENT_CLOSER ; we use filters
 		OPERATOR_NOT,             ## !
 		COMPARATOR_EQUAL,         ## ==
 		COMPARATOR_INEQUAL,       ## !=
@@ -163,6 +163,7 @@ class Token:
 		COMBINATOR_OR,            ## or
 		COMBINATOR_NAND,          ## nand
 		COMBINATOR_XOR,           ## xor
+		# CONTAINOR_IN ?
 		INFIX_IN,                 ## in
 	}
 
@@ -233,15 +234,15 @@ class Tokenizer:
 	const symbol_operator_subtraction := '-'
 	const symbol_operator_multiplication := '*'
 	const symbol_operator_division := '/'
+	const symbol_operator_modulo := '%'
 	const symbol_operator_not := '!'
-	#const symbol_operator_modulo := '%'  # this symbol is disabled ; LL(1)
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='
 	const symbol_comparator_less_than := '<'
 	const symbol_comparator_less_or_equal_than := '<='
 	const symbol_comparator_greater_than := '>'
 	const symbol_comparator_greater_or_equal_than := '>='
-	const symbol_string_delimiter := '"'  # single rune, CANNOT be backslash
+	const symbol_string_delimiter := '"'  # single rune, MUST NOT be backslash
 	const symbol_group_separator := ','
 	const symbol_accessor_property := '.'
 
@@ -290,8 +291,11 @@ class Tokenizer:
 		self.integer_literal_regex = RegEx.new()
 		has_compiled = self.integer_literal_regex.compile(
 			LINE_START_ANCHOR
-			+ "[0-9]+"
-			# TODO: support 0xff and 0b101010
+			+ "(?:"
+			+ "0[xX][a-f0-9]+"
+			+ "|0[bB][01]+"
+			+ "|[0-9]+"
+			+ ")"
 		)
 		assert(has_compiled == OK, "Numbers must be ßr0k3n")
 
@@ -605,6 +609,7 @@ class Tokenizer:
 		if tokenize_operator_subtraction() == OK: return OK
 		if tokenize_operator_multiplication() == OK: return OK
 		if tokenize_operator_division() == OK: return OK
+		if tokenize_operator_modulo() == OK: return OK
 		if tokenize_comparator_equality() == OK: return OK
 		if tokenize_comparator_inequality() == OK: return OK  # before not
 		if tokenize_comparator_comparison() == OK: return OK
@@ -702,6 +707,12 @@ class Tokenizer:
 		return tokenize_symbol(
 			self.symbol_operator_division,
 			Token.Types.OPERATOR_DIVISION,
+		)
+
+	func tokenize_operator_modulo() -> Error:
+		return tokenize_symbol(
+			self.symbol_operator_modulo,
+			Token.Types.OPERATOR_MODULO,
 		)
 
 	func tokenize_comparator_equality() -> Error:
@@ -1008,12 +1019,13 @@ class IntegerLiteralNode:
 		assert(token.type == Token.Types.LITERAL_INTEGER)
 		assert(token.literal.length() >= 1)
 		var node := IntegerLiteralNode.new()
-		node.value = int(token.literal)
+		if token.literal.to_lower().begins_with('0x'):
+			node.value = token.literal.hex_to_int()
+		elif token.literal.to_lower().begins_with('0b'):
+			node.value = token.literal.bin_to_int()
+		else:
+			node.value = int(token.literal)
 		node.tokens.append(token)
-		# Commented because 11 != 011
-		#assert(str(node.value) == token.literal, "%s != %s" % [
-			#str(node.value), token.literal,
-		#])
 		return node
 
 	func evaluate(_context: VisitorContext) -> Variant:
@@ -1138,6 +1150,14 @@ class DivisionOperatorNode:
 	extends BinaryOperatorNode
 	func evaluate_binary(left: Variant, right: Variant) -> Variant:
 		return left / right
+
+
+class ModuloOperatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		if (left is int) and (right is int):
+			return left % right
+		return fmod(float(left), float(right))
 
 
 @abstract
@@ -1533,6 +1553,7 @@ class SetStatementExtension:
 		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
 		var value = (node.children[1] as ExpressionNode).evaluate(context)
 		context.variables.set(identifier, value)
+		context.block_variables.set(identifier, value)
 		return ""
 
 
@@ -1834,25 +1855,16 @@ class Parser:
 		# Somewhat safe fallback ; should not happen anyway.
 		return RawDataNode.new().with_data("")
 
-	# Grammar Quick Notes
-	# -------------------
-	# EXPRESSION = LITERAL_IDENTIFIER
-	#            | LITERAL
-	#            | PREFIX_OPERATOR EXPRESSION
-	#            | EXPRESSION INFIX_OPERATOR EXPRESSION
-	#            | EXPRESSION "|" FILTER
-	#            | "(" EXPRESSION ")"
-	#
 	# Stratified Grammar for Expressions
 	# ----------------------------------
 	# EXPRESSIONS = EXPRESSION ( "," EXPRESSION )*
 	# EXPRESSION = COMBINATION
-	# COMBINATION = EQUALITY ( ( "n"?"and" | "x"?"or" ) EQUALITY )*
+	# COMBINATION = EQUALITY ( ( "and" | "or" ) EQUALITY )*
 	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )*
 	# COMPARISON = ADDITION ( ( "<=" | "<" | ">=" | ">" ) ADDITION )*
 	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) MULTIPLICATION )*
 	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MODULO )*
-	# MODULO = FILTER ( "%" FILTER )*   → NO: conflicts with %}
+	# MODULO = FILTER ( "%" FILTER )*
 	# FILTER = UNARY ( "|" FILTER_IDENTIFIER ( "(" EXPRESSIONS ")" )? )*
 	# UNARY = ( "+" | "-" | "!" ) UNARY
 	#       | SECONDARY
@@ -1971,7 +1983,7 @@ class Parser:
 		return node
 
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
-		var node := parse_filter(context)
+		var node := parse_modulo(context)
 		while (
 			context.match_type(Token.Types.OPERATOR_MULTIPLICATION) or
 			context.match_type(Token.Types.OPERATOR_DIVISION)
@@ -1991,16 +2003,15 @@ class Parser:
 					)
 		return node
 
-	# FIXME: use a filter for modulo, not the % symbol
-	#func parse_modulo(context: ParserContext) -> ExpressionNode:
-		#var node := parse_unary(context)
-		#while (context.match_type(Token.Types.OPERATOR_MODULO)):
-			#node = (
-				#ModuloOperatorNode.new()
-				#.with_child(node)
-				#.with_child(parse_modulo(context))
-			#)
-		#return node
+	func parse_modulo(context: ParserContext) -> ExpressionNode:
+		var node := parse_filter(context)
+		while (context.match_type(Token.Types.OPERATOR_MODULO)):
+			node = (
+				ModuloOperatorNode.new()
+				.with_child(node)
+				.with_child(parse_modulo(context))
+			)
+		return node
 
 	func parse_filter(context: ParserContext) -> ExpressionNode:
 		var node := parse_unary(context)
@@ -2079,7 +2090,6 @@ class Parser:
 		match token.type:
 			Token.Types.LITERAL_IDENTIFIER:
 				return IdentifierLiteralNode.from_token(token)
-				#return IdentifierLiteralNode.new().with_identifier(token.literal).with_token(token) as IdentifierLiteralNode
 			Token.Types.LITERAL_BOOLEAN_TRUE:
 				return BooleanLiteralNode.from_token(token, true)
 			Token.Types.LITERAL_BOOLEAN_FALSE:
@@ -2112,9 +2122,17 @@ class VisitorContext:
 	extends Resource
 	## identifier:String => value:Variant
 	var variables := {}
+	## identifier:String => value:Variant
+	var block_variables := {}
+	
+	func get_variable(identifier: String, default: Variant = null) -> Variant:
+		return self.block_variables.get(
+			identifier,
+			self.variables.get(identifier, default),
+		)
 
 
-## Cleans up the syntax tree ?
+## Cleans up the syntax tree ?  (unused)
 class JanitorVisitor:
 	extends RefCounted
 	func visit(_tree: SyntaxTree) -> void:
@@ -2149,7 +2167,7 @@ func render(source: String, variables: Dictionary) -> String:
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)
-	
+
 	var visitor_context := VisitorContext.new()
 	visitor_context.variables = variables.duplicate()
 

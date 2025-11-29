@@ -36,16 +36,15 @@ Usage Example
 -------------
 
 ```gdscript
-
 # Instantiate the string engine
-var string_engine := StringEngine.new()
+var giwt := StringEngine.new()
 
 # Configure the string engine however you desire (like Twig, in this example)
-string_engine.clear_newline_after_statement = true
-string_engine.clear_newline_after_comment = true
+giwt.clear_newline_after_statement = true
+giwt.clear_newline_after_comment = true
 
 # Render a template with some variables
-var out: String = string.engine.render(
+var out: String = giwt.render(
 	"Hello {% if name %}{{ name | uppercase }}{% else %}World{% endif %}!",
 	{ &'name': "Godette" },
 )
@@ -68,12 +67,16 @@ Features
 - [x] variables
 - [x] comments `{# … #}`
 - [x] expressions
-	- [x] integers and floats
+	- [ ] integers
+		- [x] decimal `777`
+		- [ ] hexadecimal `0xff3399`
+		- [ ] binary `0b101010`
+	- [x] floats
+	- [x] strings `"Bonjour!"`
 	- [x] grouping with parentheses
-	- [x] arithmetic `+ - * /`
+	- [x] arithmetic `+ - * / %`
 	- [x] comparison `== != < <= > >=`
 	- [x] combination `and or nand xor`
-	- [x] strings `"Bonjour!"`
 	- [ ] concatenation `~`
 	- [x] arrays
 	- [ ] arrays' indices  `foo[4]`
