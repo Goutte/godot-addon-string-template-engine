@@ -14,10 +14,12 @@ class Person:
 		self.rank = some_rank
 		self.name = some_name
 		self.surname = some_surname
-		
+
 
 func test_a_bunch_of_rules() -> void:
 	var data := [
+
+#region Basics
 		{
 			&'rule': "Empty template yields empty string",
 			&'template': "",
@@ -38,6 +40,10 @@ func test_a_bunch_of_rules() -> void:
 			},
 			&'expected': "Bonjour !",
 		},
+#endregion
+
+#region Print with {{ … }}
+
 		{
 			&'rule': "Print a variable with {{ … }}",
 			&'template': "Hello {{ name }}!",
@@ -45,22 +51,6 @@ func test_a_bunch_of_rules() -> void:
 				&'name': 'Godette',
 			},
 			&'expected': "Hello Godette!",
-		},
-		{
-			&'rule': "Whitespaces inside are optional",
-			&'template': "Hello {{name}}!",
-			&'variables': {
-				&'name': 'Goutte',
-			},
-			&'expected': "Hello Goutte!",
-		},
-		{
-			&'rule': "Whitespaces inside are conflatable",
-			&'template': "Hello {{   name  	\n	  }}!",
-			&'variables': {
-				&'name': 'there',
-			},
-			&'expected': "Hello there!",
 		},
 		{
 			&'rule': "Accept unicode runes as values",
@@ -72,14 +62,19 @@ func test_a_bunch_of_rules() -> void:
 			},
 			&'expected': "Hello 🤖 Godot's Community ♥♥!",
 		},
-		{
-			&'rule': "Access objects' properties with .",
-			&'template': "Hello {{ person.name }} {{ person.surname }}!",
-			&'variables': {
-				&'person': Person.new(42, "Jean", "Valjean"),
-			},
-			&'expected': "Hello Jean Valjean!",
-		},
+		# NOTE: this is tedious to make safe, especially without regex's \p{…}
+		#{
+			#&'rule': "Allow unicode runes in identifiers",
+			#&'template': """
+			#🥳 with 🦊 like {{ 🦋 }}
+			#""",
+			#&'variables': {
+				#&'🦋': "🦺",
+			#},
+			#&'expected': """
+			#🥳 with 🦊 like 🦺
+			#""",
+		#},
 		{
 			&'rule': "Accept multiline templates",
 			&'template': """
@@ -99,32 +94,38 @@ func test_a_bunch_of_rules() -> void:
 			Cordially, yours truly.
 			""",
 		},
-		#{
-			#&'rule': "Allow unicode runes (unsafe)",
-			#&'template': """
-			#🥳 with 🦊 like {{ 🦋 }}
-			#""",
-			#&'variables': {
-				#&'🦋': "🦺",
-			#},
-			#&'expected': """
-			#🥳 with 🦊 like 🦺
-			#""",
-		#},
+#endregion
+#region Comment with {# … #}
+
 		{
-			# NOTE: Use {% verbatim %} … {% endverbatim %} instead of escape sequances
-			&'rule': "Backslashes do NOT escape instructions",
+			&'rule': "Comments",
 			&'template': """
-			use \\{{namespace}}\\{{class}};
+			{#################################}
+			A{# nother one #}B{#ites the dust#}!
+			{#################################}
 			""",
-			&'variables': {
-				&'namespace': "Addons",
-				&'class': "StringEngine",
-			},
+			&'variables': {},
 			&'expected': """
-			use \\Addons\\StringEngine;
+			
+			AB!
+			
 			""",
 		},
+#endregion
+
+#region Accessors
+
+		{
+			&'rule': "Access objects' properties with .",
+			&'template': "Hello {{ person.name }} {{ person.surname }}!",
+			&'variables': {
+				&'person': Person.new(42, "Jean", "Valjean"),
+			},
+			&'expected': "Hello Jean Valjean!",
+		},
+#endregion
+
+#region Literals
 		{
 			&'rule': "Integers",
 			&'template': """
@@ -211,6 +212,9 @@ func test_a_bunch_of_rules() -> void:
 			TODO
 			""",
 		},
+#endregion
+#region Maths
+
 		{
 			&'rule': "Addition of integers",
 			&'template': """
@@ -362,6 +366,9 @@ func test_a_bunch_of_rules() -> void:
 			1202
 			""",
 		},
+#endregion
+#region Boolean Logic
+
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
@@ -431,6 +438,55 @@ func test_a_bunch_of_rules() -> void:
 			false
 			""",
 		},
+#endregion
+
+#region | abs
+		{
+			&'rule': "Filter abs",
+			&'template': """
+			{{ 0 | abs }}
+			{{ 1 | abs }}
+			{{ 2.0 | abs }}
+			{{ -0 | abs }}
+			{{ -1 | abs }}
+			{{ -2.0 | abs }}
+			""",
+			&'variables': {},
+			&'expected': """
+			0
+			1
+			2.0
+			0
+			1
+			2.0
+			""",
+		},
+#endregion
+#region | capitalize
+		{
+			&'rule': "Filter capitalize",
+			&'template': """
+			{{ "" | capitalize }}
+			{{ "paris" | capitalize }}
+			{{ "BERLIN" | capitalize }}
+			{{ "ElSalvador" | capitalize }}
+			{{ "Saint-Louis du Senegal" | capitalize }}
+			{{ 666 | capitalize }}
+			{{ true | capitalize }}
+			""",
+			&'variables': {},
+			&'expected': """
+			
+			Paris
+			Berlin
+			El Salvador
+			Saint Louis Du Senegal
+			666
+			True
+			""",
+		},
+#endregion
+#region | uppercase
 		{
 			&'rule': "Filters for uppercase and lowercase",
 			&'template': """
@@ -455,62 +511,9 @@ func test_a_bunch_of_rules() -> void:
 			FALSE
 			""",
 		},
-		{
-			&'rule': "Filter abs",
-			&'template': """
-			{{ 0 | abs }}
-			{{ 1 | abs }}
-			{{ 2.0 | abs }}
-			{{ -0 | abs }}
-			{{ -1 | abs }}
-			{{ -2.0 | abs }}
-			""",
-			&'variables': {},
-			&'expected': """
-			0
-			1
-			2.0
-			0
-			1
-			2.0
-			""",
-		},
-		{
-			&'rule': "Filter capitalize",
-			&'template': """
-			{{ "" | capitalize }}
-			{{ "paris" | capitalize }}
-			{{ "BERLIN" | capitalize }}
-			{{ "ElSalvador" | capitalize }}
-			{{ "Saint-Louis du Senegal" | capitalize }}
-			{{ 666 | capitalize }}
-			{{ true | capitalize }}
-			""",
-			&'variables': {},
-			&'expected': """
-			
-			Paris
-			Berlin
-			El Salvador
-			Saint Louis Du Senegal
-			666
-			True
-			""",
-		},
-		{
-			&'rule': "Comments",
-			&'template': """
-			{#################################}
-			A{# nother one #}B{#ites the dust#}!
-			{#################################}
-			""",
-			&'variables': {},
-			&'expected': """
-			
-			AB!
-			
-			""",
-		},
+#endregion
+
+#region {% if … %} … {% else %} … {% endif %}
 		{
 			&'rule': "If statement",
 			&'template': """
@@ -566,6 +569,9 @@ func test_a_bunch_of_rules() -> void:
 			
 			""",
 		},
+#endregion
+#region {% set … = … %}
+
 		{
 			&'rule': "Set statement",
 			&'template': """
@@ -584,6 +590,9 @@ func test_a_bunch_of_rules() -> void:
 			Hello pouloupi!
 			""",
 		},
+#endregion
+#region {% while … %} … {% endwhile %}
+
 		{
 			&'rule': "While statement",
 			&'template': """
@@ -598,6 +607,9 @@ func test_a_bunch_of_rules() -> void:
 			54321
 			""",
 		},
+#endregion
+#region {% for … %} … {% endfor %}
+
 		{
 			&'rule': "For statement",
 			&'template': """
@@ -609,6 +621,75 @@ func test_a_bunch_of_rules() -> void:
 			&'expected': """
 			2 3 5 7 11 
 			""",
+		},
+#endregion
+#region {% verbatim %} … {% endverbatim %}
+
+		{
+			&'rule': "Verbatim statement",
+			&'template': """
+			{% verbatim %}
+			Use an echo statement like so: `Hello {{ name }}`
+			With the key `'name'` set to `"world"` in the `variables` Dictionary.
+			{% endverbatim %}
+			""",
+			&'variables': {
+				&'name': "Escaper",
+			},
+			&'expected': """
+			
+			Use an echo statement like so: `Hello {{ name }}`
+			With the key `'name'` set to `"world"` in the `variables` Dictionary.
+			
+			""",
+		},
+		{
+			&'rule': "Verbatim statement (preserves conflatable whitespaces)",
+			&'template': """
+			{% verbatim %}Use an echo statement like so: `Hello {{  name  }}`.{% endverbatim %}
+			""",
+			&'variables': {
+				&'name': "Escaper",
+			},
+			&'expected': """
+			Use an echo statement like so: `Hello {{  name  }}`.
+			""",
+		},
+		# I don't know what to do with this one for now…
+		#{
+			#&'rule': "Verbatim statement (recursion)",
+			#&'template': """
+			#{% verbatim %}
+			#{% verbatim %}
+			#Hello {{  name  }}
+			#{% endverbatim %}
+			#{% endverbatim %}
+			#""",
+			#&'variables': {
+				#&'name': "verboten",
+			#},
+			#&'expected': """
+			# ?
+			#""",
+		#},
+#endregion
+
+#region Whitespace handling
+		{
+			&'rule': "Whitespaces inside are optional",
+			&'template': "Hello {{name}}!",
+			&'variables': {
+				&'name': 'Goutte',
+			},
+			&'expected': "Hello Goutte!",
+		},
+		{
+			&'rule': "Whitespaces inside are conflatable",
+			&'template': "Hello {{   name  	\n	  }}!",
+			&'variables': {
+				&'name': 'there',
+			},
+			&'expected': "Hello there!",
 		},
 		{
 			&'rule': "Clear spaces and tabs before statements with ~",
@@ -765,53 +846,25 @@ func test_a_bunch_of_rules() -> void:
 			#5
 			#""",
 		#},
+#endregion
+
+#region Miscellaneous
 		{
-			&'rule': "Verbatim statement",
+			# NOTE: Use {% verbatim %} … {% endverbatim %} instead to "escape"
+			&'rule': "Backslashes do NOT escape instructions",
 			&'template': """
-			{% verbatim %}
-			Use an echo statement like so: `Hello {{ name }}`
-			With the key `'name'` set to `"world"` in the `variables` Dictionary.
-			{% endverbatim %}
+			use \\{{namespace}}\\{{class}};
 			""",
 			&'variables': {
-				&'name': "Escaper",
+				&'namespace': "Addons",
+				&'class': "StringEngine",
 			},
 			&'expected': """
-			
-			Use an echo statement like so: `Hello {{ name }}`
-			With the key `'name'` set to `"world"` in the `variables` Dictionary.
-			
+			use \\Addons\\StringEngine;
 			""",
 		},
-		{
-			&'rule': "Verbatim statement (preserves conflatable whitespaces)",
-			&'template': """
-			{% verbatim %}Use an echo statement like so: `Hello {{  name  }}`.{% endverbatim %}
-			""",
-			&'variables': {
-				&'name': "Escaper",
-			},
-			&'expected': """
-			Use an echo statement like so: `Hello {{  name  }}`.
-			""",
-		},
-		# I don't know what to do with this one for now…
-		#{
-			#&'rule': "Verbatim statement (recursion)",
-			#&'template': """
-			#{% verbatim %}
-			#{% verbatim %}
-			#Hello {{  name  }}
-			#{% endverbatim %}
-			#{% endverbatim %}
-			#""",
-			#&'variables': {
-				#&'name': "verboten",
-			#},
-			#&'expected': """
-			# ?
-			#""",
-		#},
+#endregion
+
 	]
 	for datum: Dictionary in data:
 		print("\t* %s" % [datum.get(&'rule', "<unnamed rule>")])
