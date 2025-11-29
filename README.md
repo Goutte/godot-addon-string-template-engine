@@ -67,11 +67,15 @@ Features
 - [x] variables
 - [x] comments `{# … #}`
 - [x] expressions
-	- [ ] integers
+	- [x] integers
 		- [x] decimal `777`
-		- [ ] hexadecimal `0xff3399`
-		- [ ] binary `0b101010`
+		- [x] hexadecimal `0xff3399`
+		- [x] binary `0b101010`
 	- [x] floats
+		- [x] decimal `1.62`
+		- [x] fract `.62`
+		- [x] whole `3.`
+		- [x] scientific `6.53e-34`
 	- [x] strings `"Bonjour!"`
 	- [x] grouping with parentheses
 	- [x] arithmetic `+ - * / %`

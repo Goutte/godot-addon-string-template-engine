@@ -303,11 +303,11 @@ class Tokenizer:
 		has_compiled = self.float_literal_regex.compile(
 			LINE_START_ANCHOR
 			+ "(?:"
-			+ "\\d+\\.\\d*e\\d+"   # 1.618e3
-			+ "|\\d*\\.\\d+e\\d+"  # .333e10
-			+ "|\\d+e\\d+"         # 3e9
-			+ "|\\d+\\.\\d*"       # 2.7 or 2.
-			+ "|\\.\\d+"           # .2
+			+ "\\d+\\.\\d*e\\d+"        # 1.618e3
+			+ "|\\d*\\.\\d+e[+-]?\\d+"  # .333e10
+			+ "|\\d+e[+-]?\\d+"         # 3e9
+			+ "|\\d+\\.\\d*"            # 2.7 or 2.
+			+ "|\\.\\d+"                # .2
 			+ ")"
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
@@ -1831,14 +1831,13 @@ class Parser:
 			Token.Types.RAW_DATA:
 				return RawDataNode.new().with_data(token.literal).with_token(token)
 			Token.Types.ECHO_OPENER:
-				#var tokens_subset := context.consume_until_type(Token.Types.ECHO_CLOSER)
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
 					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
 
-				var echo_tokens: Array[Token] = []
+				var echo_tokens: Array[Token] = []  # FIXME
 				#echo_tokens.append(token)
-				#echo_tokens.append_array(tokens_subset)  # FIXME
+				#echo_tokens.append_array(tokens_subset)
 				#echo_tokens.append(context.get_current_token(-1))
 				return EchoNode.new().with_expression(expression).with_tokens(echo_tokens)
 			Token.Types.STATEMENT_OPENER:
