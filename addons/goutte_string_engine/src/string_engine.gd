@@ -3,8 +3,8 @@
 class_name StringEngine
 extends RefCounted
 
-# WHY: Useful to generate shaders, dynamic dialogues, maybe HTML…
-# SLOW: try the fast Ginja addon using a gdextension to wrap Inja.
+# WHY?: Generate shaders, dynamic dialogues, maybe even HTML…
+# TOO SLOW?: try the fast Ginja addon using a gdextension to wrap Inja.
 
 ## Clear a single newline if it immediately follows a statement.
 var clear_newline_after_statement := false
@@ -12,6 +12,8 @@ var clear_newline_after_statement := false
 var clear_newline_after_comment := false
 ## Clear a single newline if it immediately follows a print.
 var clear_newline_after_echo := false
+
+var break_on_error := true
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
@@ -35,6 +37,12 @@ var filter_extensions: Array[FilterExtension] = [
 	UpperFilterExtension.new(),
 	UppercaseFilterExtension.new(),
 ]
+
+
+#class ErrorHandler:
+	#func handle_error(message: String) -> void:
+		#pass
+
 
 
 #region Data Structures
@@ -70,6 +78,9 @@ class StringView:
 	func get_as_string() -> String:
 		return __string.substr(__start, __length)
 
+	func start() -> int:
+		return __start
+
 	func length() -> int:
 		return __length
 
@@ -79,6 +90,9 @@ class StringView:
 	func sanitize_delimiters() -> void:
 		self.__start = clampi(__start, 0, __string.length())
 		self.__length = clampi(__length, 0, __string.length() - __start)
+
+	func line() -> int:
+		return 1 + __string.count("\n", 0, __start)
 
 	## Faster but breaks line anchor metacharacters like ^ and $
 	func rsearch(regex: RegEx) -> RegExMatch:
@@ -125,6 +139,7 @@ class Token:
 	extends Resource
 	enum Types {
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
+		EOF,                      ## Token we get at the End Of File
 		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
 		# FIXME: ECHO → PRINT ?
 		ECHO_OPENER,              ## {{
@@ -168,8 +183,17 @@ class Token:
 	}
 
 	@export var type := Types.UNKNOWN
-	## aka. lexeme; the raw value found in the source template
+	
+	## The raw, unadultered value found in the source template.
 	@export var literal := ""
+	
+	## FIXME: use this, maybe?
+	## The actual value we're going to use in the parser.
+	## Almost the same as the literal, but with some whitespace treatment.
+	@export var lexeme := ""
+	
+	@export var starts_in_source_at := 0  # 0-indexed
+	@export var starts_in_source_at_line := 0  # 1-indexed
 	@export var whitespaces_before := ""
 	@export var whitespaces_after := ""
 	
@@ -184,6 +208,19 @@ class Token:
 
 	func with_literal(value: String) -> Token:
 		self.literal = value
+		self.lexeme = value
+		return self
+
+	func with_lexeme(value: String) -> Token:
+		self.lexeme = value
+		return self
+
+	func starting_at(index0: int) -> Token:
+		self.starts_in_source_at = index0
+		return self
+
+	func starting_at_line(index1: int) -> Token:
+		self.starts_in_source_at_line = index1
 		return self
 
 	func _to_string() -> String:
@@ -206,6 +243,11 @@ class Tokenizer:
 	var clear_newline_after_statement := false
 	var clear_newline_after_comment := false
 	var clear_newline_after_echo := false
+	
+	## This is always false in exported builds, as they have no breakpoints.
+	## We use this to assert stuff about our errors in the test suite.
+	var break_on_error := true
+	
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
 	var symbol_echo_opener := '{{'
@@ -396,6 +438,7 @@ class Tokenizer:
 		while self.source_view.length() > 0:
 			match self.state:
 				States.RAW_DATA:
+					# Let's consume as raw data until we find any opener.
 					tokenize_raw_data()
 				States.ECHO:
 					# At this point we have consumed the {{ opener already.
@@ -577,7 +620,7 @@ class Tokenizer:
 			var whole_match := regex_match.get_string()
 			add_token(Token.Types.STATEMENT_IDENTIFIER, whole_match)
 			consume_source(whole_match.length())
-	
+
 	func tokenize_expression() -> Error:
 		var tokenized_at_least_once := ERR_UNAVAILABLE
 		var tokenized := OK
@@ -598,8 +641,7 @@ class Tokenizer:
 		):
 			return ERR_OUT_OF_MEMORY
 		
-		# Goal: ordered by decreasing usage, yet respecting special precedences
-		# This goal will never be achieved and will require serious benchmarking
+		# Goal: ordered by decreasing usage, yet respecting special precedences?
 		if tokenize_literal_boolean() == OK: return OK  # before identifier
 		if tokenize_literal_float() == OK: return OK  # before integer
 		if tokenize_literal_integer() == OK: return OK
@@ -816,7 +858,13 @@ class Tokenizer:
 		self.state = value
 
 	func add_token(type: Token.Types, literal: String) -> void:
-		self.tokens.append(Token.new().with_type(type).with_literal(literal))
+		self.tokens.append(
+			Token.new()
+			.with_type(type)
+			.with_literal(literal)
+			.starting_at(self.source_view.start())
+			.starting_at_line(self.source_view.line())
+		)
 	
 	func add_raw_data_token(literal: String) -> void:
 		if not self.tokens.is_empty():
@@ -853,9 +901,19 @@ class Tokenizer:
 		var consumed_whitespaces := consume_whitespaces()
 		self.tokens[-1].whitespaces_after += consumed_whitespaces
 
+	var errors: Array[TemplateError] = []
 	func raise_error(message: String) -> void:
+		if self.tokens:
+			var token: Token = self.tokens[-1]
+			message += "\n" + "At line %d" % [
+				token.starts_in_source_at_line
+			]
 		printerr(message)
-		assert(false, message)
+		var error := TemplateError.new()
+		error.message = message
+		errors.append(error)
+		if break_on_error:
+			assert(false, message)
 
 	# No RegEx.escape() support yet, see https://github.com/godotengine/godot-proposals/issues/7995
 	func escape_for_regex(input: String) -> String:
@@ -1432,12 +1490,13 @@ class IfElseStatementExtension:
 		# The engine has already parsed the statement opener and identifier.
 		# The rest is up to us, now.
 		# {% if <some_condition> %} … {% else %} … {% end %}
-
+		var if_identifier_token := context.get_previous_token()
+		
 		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 
-		var detect_else := context.detect_other_statement('else')
-		var detect_end := context.detect_other_statement('end' + get_identifier())
+		var detect_else := context.detect_statement('else')
+		var detect_end := context.detect_statement('end' + get_identifier())
 		var detect_else_or_end := func(pc: ParserContext) -> bool:
 			return detect_else.call(pc) or detect_end.call(pc)
 
@@ -1447,18 +1506,26 @@ class IfElseStatementExtension:
 			then_node,
 			detect_else_or_end,
 		)
-		var found_else := detect_else.call(context) as bool
-		context.consume_some_tokens(3)  # luck: else & end have the same shape
-
+		
 		var else_node: SyntaxNode
+		var found_else := detect_else.call(context) as bool
 		if found_else:
+			context.consume_some_tokens(3)  # {% else %}
 			else_node = SyntaxNode.new()
-			parser.parse_tokens_until(
+			parser.parse_tokens_until(context, else_node, detect_end)
+		
+		var found_end := detect_end.call(context) as bool
+		if found_end:
+			context.consume_some_tokens(3)  # {% endif %}
+		else:
+			parser.raise_error(
 				context,
-				else_node,
-				detect_end,
+				"Expected an {%% %s %%} at some point to close the {%% %s … %%} found at line %d, but did not find it." % [
+					'end' + get_identifier(),
+					get_identifier(),
+					if_identifier_token.starts_in_source_at_line,
+				]
 			)
-			context.consume_some_tokens(3)
 
 		var if_node := (
 			StatementNode
@@ -1567,7 +1634,7 @@ class ForStatementExtension:
 		var iterable := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		
-		var detect_end := context.detect_other_statement('end' + get_identifier())
+		var detect_end := context.detect_statement('end' + get_identifier())
 		var for_body := SyntaxNode.new()
 		parser.parse_tokens_until(
 			context,
@@ -1613,7 +1680,7 @@ class WhileStatementExtension:
 		var condition := parser.parse_expression(context)
 		context.consume_type(Token.Types.STATEMENT_CLOSER)
 		
-		var detect_end := context.detect_other_statement('end' + get_identifier())
+		var detect_end := context.detect_statement('end' + get_identifier())
 		var while_body := SyntaxNode.new()
 		parser.parse_tokens_until(
 			context,
@@ -1712,13 +1779,22 @@ class ParserContext:
 
 	## Scans the current token and consumes it if it matches the type.
 	func match_type(type: Token.Types) -> bool:
+		if not has_tokens_remaining():
+			return false
 		var matched := get_current_token().type == type
 		if matched:
 			consume_token()
 		return matched
 
 	func get_current_token(offset := 0) -> Token:
+		var offseted_index := self.current_token_index + offset
+		if offseted_index >= self.tokens.size():
+			return Token.new().with_type(Token.Types.EOF)
+		if offseted_index < 0:
+			breakpoint
+			return Token.new()
 		return self.tokens[self.current_token_index + offset]
+
 	func get_previous_token() -> Token:
 		return get_current_token(-1)
 
@@ -1777,7 +1853,7 @@ class ParserContext:
 				return matches_all
 		)
 
-	func detect_other_statement(identifier: String) -> Callable:
+	func detect_statement(identifier: String) -> Callable:
 		return (
 			func(context: ParserContext) -> bool:
 				return (
@@ -1790,6 +1866,9 @@ class ParserContext:
 
 class Parser:
 	extends RefCounted
+
+	var break_on_error := true
+	var errors: Array[TemplateError] = []
 
 	func parse(
 		tokens: Array[Token],
@@ -1833,7 +1912,10 @@ class Parser:
 			Token.Types.ECHO_OPENER:
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
-					raise_error("Expected }}, but got something else: %s" % context.get_current_token())
+					if context.has_tokens_remaining():
+						raise_error(context, "Expected }}, but got something else: %s" % context.get_current_token())
+					else:
+						raise_error(context, "Expected }}, but found the end of the document.")
 
 				var echo_tokens: Array[Token] = []  # FIXME
 				#echo_tokens.append(token)
@@ -1848,8 +1930,8 @@ class Parser:
 			Token.Types.COMMENT_OPENER:
 				context.consume_some_tokens(2)
 				return CommentNode.new()
-			_:
-				breakpoint  # implement your new "main" token type !
+			#_:
+				#breakpoint  # implement your new "main" token type !
 
 		# Somewhat safe fallback ; should not happen anyway.
 		return RawDataNode.new().with_data("")
@@ -2078,7 +2160,7 @@ class Parser:
 			context.consume_token()
 			var inside := parse_expression(context)
 			if not context.match_type(Token.Types.EXPRESSION_GROUP_CLOSER):
-				raise_error("Expected `)` but got `%s`." % [
+				raise_error(context, "Expected `)` but got `%s`." % [
 					context.get_current_token(),
 				])
 			return inside
@@ -2100,17 +2182,34 @@ class Parser:
 			Token.Types.LITERAL_STRING:
 				return StringLiteralNode.from_token(token)
 			_:
-				raise_error("Parser expected a literal, but got `%s`." % token)
+				raise_error(context, "Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
 
 	func parse_literal_identifier(context: ParserContext) -> ExpressionNode:
 		var token := context.consume_current_token()
 		assert(token.type == Token.Types.LITERAL_IDENTIFIER)
 		return IdentifierLiteralNode.from_token(token)
-
-	func raise_error(message: String):
+	
+	func raise_error(
+		context: ParserContext,
+		message: String,
+		token: Token = null,
+	):
+		if not token:
+			if context.has_tokens_remaining():
+				token = context.get_current_token()
+			elif not context.tokens.is_empty():
+				token = context.get_previous_token()
+		if token:
+			message += "\n" + "At line %d" % [
+				token.starts_in_source_at_line
+			]
 		printerr(message)
-		assert(false, message)
+		var error := TemplateError.new()
+		error.message = message
+		self.errors.append(error)
+		if break_on_error:
+			assert(false, message)
 
 #endregion
 
@@ -2152,20 +2251,35 @@ class EvaluatorVisitor:
 #endregion
 
 
-## Renders a source template using the variables.
-## The main method of the string template engine.
-func render(source: String, variables: Dictionary) -> String:
+class TemplateError:
+	extends Resource
+	@export var message: String
 
+class RenderedTemplate:
+	extends Resource
+	@export var output: String
+	@export var errors: Array[TemplateError]
+
+
+## Renders a source template using the variables.
+## This is the main method of the string template engine.
+func render(source: String, variables: Dictionary) -> RenderedTemplate:
+
+	var errors: Array[TemplateError] = []
 	var tokenizer := Tokenizer.new()
 	tokenizer.clear_newline_after_statement = self.clear_newline_after_statement
 	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
 	tokenizer.clear_newline_after_echo = self.clear_newline_after_echo
+	tokenizer.break_on_error = self.break_on_error
 	var tokens := tokenizer.tokenize(source)
+	errors.append_array(tokenizer.errors)
 
 	var parser := Parser.new()
+	parser.break_on_error = self.break_on_error
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)
+	errors.append_array(parser.errors)
 
 	var visitor_context := VisitorContext.new()
 	visitor_context.variables = variables.duplicate()
@@ -2175,5 +2289,9 @@ func render(source: String, variables: Dictionary) -> String:
 
 	var visitor := EvaluatorVisitor.new()
 	var output := visitor.visit(syntax_tree, visitor_context)
+	
+	var rendered := RenderedTemplate.new()
+	rendered.output = output
+	rendered.errors = errors
 
-	return output
+	return rendered

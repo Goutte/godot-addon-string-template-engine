@@ -677,7 +677,7 @@ func test_a_bunch_of_rules() -> void:
 
 #region Whitespace handling
 		{
-			&'rule': "Whitespaces inside are optional",
+			&'rule': "Padding whitespaces are optional",
 			&'template': "Hello {{name}}!",
 			&'variables': {
 				&'name': 'Goutte',
@@ -685,7 +685,7 @@ func test_a_bunch_of_rules() -> void:
 			&'expected': "Hello Goutte!",
 		},
 		{
-			&'rule': "Whitespaces inside are conflatable",
+			&'rule': "Padding whitespaces are conflatable",
 			&'template': "Hello {{   name  	\n	  }}!",
 			&'variables': {
 				&'name': 'there',
@@ -767,13 +767,13 @@ func test_a_bunch_of_rules() -> void:
 			""",
 		},
 		{
-			&'rule': "Option to clear whitespaces like in Twig",
+			&'rule': "Options to clear whitespaces somewhat like in Twig",
 			&'template': """
 			Primes:
 			
-			{%~ for i in numbers %}
-			{{ i }}
-			{%~ endfor %}
+				{%~ for i in numbers %}
+				{{ i }}
+				{%~ endfor %}
 			""",
 			&'variables': {
 				&'numbers': [2, 3, 5],
@@ -784,9 +784,9 @@ func test_a_bunch_of_rules() -> void:
 			&'expected': """
 			Primes:
 			
-			2
-			3
-			5
+				2
+				3
+				5
 			""",
 		},
 		{
@@ -866,17 +866,81 @@ func test_a_bunch_of_rules() -> void:
 		},
 #endregion
 
+		{
+			&'rule': "Handle error with unfinished print statement",
+			&'template': """
+			Hoho
+			{{ title     {{ description }}"
+			""",
+			&'variables': {
+				&'title': "Excession",
+				&'description': "",
+			},
+			&'expected_error': "Expected closer token `}}`, got `{{` instead.
+At line 3",
+		},
+		{
+			&'rule': "Handle error with unfinished print statement",
+			&'template': """
+			Name: {{ "Georges"
+			Items: {{ items }}
+			""",
+			&'variables': {
+				&'items': [],
+			},
+			&'expected_error': "Expected closer token `}}`, got `: ` instead.
+At line 3",
+			#&'expected_error': "Expected closer `}}`, but got `Items` instead.
+#At line 3",
+		},
+		{
+			&'rule': "Handle error with unfinished if/then statement",
+			&'template': """
+			{% if condition %}
+			In the ancient glade
+			Across old bark
+			The quiet shade
+			It's always dark
+			""",
+			&'variables': {
+				&'condition': true,
+			},
+			&'expected_error': "Expected an {% endif %} at some point to close the {% if … %} found at line 2, but did not find it.
+At line 2",
+		},
+
 	]
 	for datum: Dictionary in data:
-		print("\t* %s" % [datum.get(&'rule', "<unnamed rule>")])
-		var engine := StringEngine.new()
+		var rule: String = datum.get(&'rule', "<unnamed rule>")
+		var template: String = datum.get(&'template')
+		var variables: Dictionary = datum.get(&'variables')
 		var configure: Callable = datum.get(&'configure', func(_se: StringEngine): return)
+		
+		print("\t* %s" % [rule])
+		
+		var engine := StringEngine.new()
 		configure.call(engine)
-		var expected: String = datum[&'expected']
-		var actual: String = engine.render(datum[&'template'], datum[&'variables'])
-		assert_equals(expected, actual, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
-			datum[&'rule'],
-			datum[&'template'],
-			datum[&'variables'],
-		])
+		
+		if datum.has(&'expected'):
+			var expected: String = datum[&'expected']
+			var actual: String = engine.render(template, variables).output
+			assert_equals(expected, actual, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
+				datum[&'rule'],
+				template,
+				variables,
+			])
+		
+		if datum.has(&'expected_error'):
+			engine.break_on_error = false
+			var expected_error: String = datum[&'expected_error']
+			var rendered := engine.render(template, variables)
+			assert(not rendered.errors.is_empty(), "Expected an error, but got none.\nWas expecting: %s" % expected_error)
+			var actual_error: StringEngine.TemplateError = rendered.errors[0]
+			assert_equals(expected_error, actual_error.message, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
+				datum[&'rule'],
+				datum[&'template'],
+				datum[&'variables'],
+			])
+			engine.break_on_error = true
+	
 	print("\tRan %d subtests" % data.size())

@@ -12,7 +12,7 @@ Let's start with the cluttering chatter we all love and hate: comments.
 
 ### Printing
 
-Printing expressions is done by wrapping them in the `{{` and `}}` symbols, like so:
+Printing expressions is done by wrapping them inbetween the `{{` and `}}` delimiters, like so:
 
 ```twig
 {{ … }}
