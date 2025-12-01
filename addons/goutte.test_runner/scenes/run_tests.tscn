@@ -1,7 +1,7 @@
 [gd_scene load_steps=3 format=3 uid="uid://doqynoyvb7t3t"]
 
-[ext_resource type="Script" uid="uid://bnj4vf2k7mgks" path="res://addons/goutte_test_runner/scenes/run_tests.gd" id="1_nmeri"]
-[ext_resource type="Script" uid="uid://duh78b75x007t" path="res://addons/goutte_test_runner/scripts/tests_runner.gd" id="1_tel50"]
+[ext_resource type="Script" uid="uid://bnj4vf2k7mgks" path="res://addons/goutte.test_runner/scenes/run_tests.gd" id="1_nmeri"]
+[ext_resource type="Script" uid="uid://duh78b75x007t" path="res://addons/goutte.test_runner/scripts/tests_runner.gd" id="1_tel50"]
 
 [node name="RunTests" type="Control" node_paths=PackedStringArray("runner", "logger")]
 layout_mode = 3

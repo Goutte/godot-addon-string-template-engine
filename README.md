@@ -171,10 +171,14 @@ Features
 		- [x] clear a newline if right after a comment (opt-in)
 		- [x] clear a newline if right after a print (opt-in)
 - [ ] error handling
-	- [ ] allow a "no assert()" mode
-	- [ ] test error handling
+	- [x] allow configuration of `break on error`
+	- [x] test error handling
+	- [ ] test error handling exhaustively
 	- [ ] show where in the template
-- [ ] auto-escaping configuration
+		- [x] line
+		- [ ] display an excerpt
+- [ ] escaping tutorial
+- [ ] auto-escaping configuration ?
 - [ ] localization utils
 - [ ] syntax highlighting
 
