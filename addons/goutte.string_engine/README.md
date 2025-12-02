@@ -47,3 +47,25 @@ You are allowed to vote, citizen.
 You are not allowed to vote yet, hatchling.
 {% endif %}
 ```
+
+## Filters
+
+### round
+
+The round filter rounds a number to a given precision:
+
+```twig
+{{ 2.55|round }}
+{# outputs 3 #}
+
+{{ 2.55|round(1, 'floor') }}
+{# outputs 2.5 #}
+```
+
+The round filter takes two optional arguments;
+the first one specifies the precision (default is 0)
+and the second the rounding method (default is common):
+
+- `common` rounds either up or down (rounds the value up to precision decimal places away from zero, when it is half way there -- making 1.5 into 2 and -1.5 into -2);
+- `ceil` always rounds up;
+- `floor` always rounds down.

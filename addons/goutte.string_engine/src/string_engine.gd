@@ -34,6 +34,7 @@ var filter_extensions: Array[FilterExtension] = [
 	CapitalizeFilterExtension.new(),
 	LowerFilterExtension.new(),
 	LowercaseFilterExtension.new(),
+	RoundFilterExtension.new(),
 	UpperFilterExtension.new(),
 	UppercaseFilterExtension.new(),
 ]
@@ -967,7 +968,8 @@ class SyntaxNode:
 		return self
 
 	## You probably want to override this in all expression nodes
-	func evaluate(_context: VisitorContext) -> Variant:
+	@warning_ignore("unused_parameter")
+	func evaluate(context: VisitorContext) -> Variant:
 		return ""
 
 	func serialize(context: VisitorContext) -> String:
@@ -1303,6 +1305,7 @@ class FilterNode:
 	extends ExpressionNode
 	@export var extension: FilterExtension
 	@export var subject: ExpressionNode
+	@export var parameters: ExpressionsNode
 
 	func with_extension(value: FilterExtension) -> FilterNode:
 		self.extension = value
@@ -1311,6 +1314,11 @@ class FilterNode:
 	func with_subject(value: ExpressionNode) -> FilterNode:
 		self.subject = value
 		self.children.push_front(value)
+		return self
+
+	func with_parameters(value: ExpressionsNode) -> FilterNode:
+		self.parameters = value
+		self.children.push_back(value)
 		return self
 
 	func evaluate(context: VisitorContext) -> Variant:
@@ -1406,21 +1414,6 @@ class CapitalizeFilterExtension:
 		return str(node.subject.evaluate(context)).capitalize()
 
 
-## Converts the subject to uppercase.
-class UppercaseFilterExtension:
-	extends FilterExtension
-	func get_identifier() -> String:	return 'uppercase'
-
-	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
-		return str(node.subject.evaluate(context)).to_upper()
-
-
-## Short alias for "uppercase"
-class UpperFilterExtension:
-	extends UppercaseFilterExtension
-	func get_identifier() -> String:	return 'upper'
-
-
 ## Converts the subject to lowercase.
 class LowercaseFilterExtension:
 	extends FilterExtension
@@ -1434,6 +1427,62 @@ class LowercaseFilterExtension:
 class LowerFilterExtension:
 	extends LowercaseFilterExtension
 	func get_identifier() -> String:	return 'lower'
+
+
+## Rounds the subject.
+class RoundFilterExtension:
+	extends FilterExtension
+	func get_identifier() -> String:	return 'round'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		var value: float = node.subject.evaluate(context)
+		var precision := 0
+		match node.children.size():
+			0:
+				breakpoint  # subject missing?
+			1:
+				pass
+			2:
+				precision = node.parameters.children[0].evaluate(context)
+			3:
+				breakpoint  # what ?!?
+
+		var method := 'common'
+		if node.parameters:
+			if node.parameters.children.size() > 1:
+				method = str(node.parameters.children[1].evaluate(context))
+
+		var shift := pow(10.0, precision);
+		match method:
+			'floor':
+				value = floorf(value * shift) / shift
+			'ceil':
+				value = ceilf(value * shift) / shift
+			'common':
+				value = roundf(value * shift) / shift
+			_:
+				breakpoint
+				value = roundf(value * shift) / shift
+
+		if precision == 0:
+			return int(value)
+
+		return value
+
+
+## Converts the subject to uppercase.
+class UppercaseFilterExtension:
+	extends FilterExtension
+	func get_identifier() -> String:	return 'uppercase'
+
+	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
+		return str(node.subject.evaluate(context)).to_upper()
+
+
+## Short alias for "uppercase"
+class UpperFilterExtension:
+	extends UppercaseFilterExtension
+	func get_identifier() -> String:	return 'upper'
 
 #endregion
 
@@ -1726,7 +1775,7 @@ class ParserContext:
 	var statement_extensions: Array[StatementExtension] = []
 	## All filters are implemented via Filter Extensions.
 	var filter_extensions: Array[FilterExtension] = []
-	## You saw nothing.
+	## The parser this context is attached to.
 	var parser: Parser
 	## Our stream of tokens we're parsing.
 	var tokens: Array[Token]
@@ -1763,8 +1812,12 @@ class ParserContext:
 			func(fe: FilterExtension):
 				return fe.matches_identifier(identifier)
 		)
-		assert(i >= 0, "No filter extension found for `%s`." % identifier)
-		return self.filter_extensions[i]
+		if i >= 0:
+			return self.filter_extensions[i]
+		raise_error("No filter extension found for `%s`." % [
+			identifier,
+		], get_current_token())
+		return null
 
 	func has_tokens_remaining(at_least := 1) -> bool:
 		return (
@@ -1862,6 +1915,12 @@ class ParserContext:
 					context.get_current_token(1).literal == identifier
 				)
 		)
+	
+	func raise_error(
+		message: String,
+		token: Token = null,
+	):
+		parser.raise_error(self, message, token)
 
 
 class Parser:
@@ -1954,7 +2013,7 @@ class Parser:
 	#         | LITERAL_IDENTIFIER
 	#         | "(" EXPRESSION ")"
 	func parse_expressions(context: ParserContext) -> ExpressionsNode:
-		var expressions_nodes := [
+		var expressions_nodes: Array[SyntaxNode] = [
 			parse_expression(context),
 		]
 		while (
@@ -2098,27 +2157,18 @@ class Parser:
 		var node := parse_unary(context)
 		while context.match_type(Token.Types.FILTER):
 			var subject := node
-
-			# FIXME: parse literal identifier
-			var literal_identifier_node := parse_literal(context)
-
-			var filter_identifier := literal_identifier_node.tokens[0].literal
-
+			var filter_identifier_node := parse_literal_identifier(context)
+			var filter_identifier := filter_identifier_node.tokens[0].lexeme
 			var filter_extension := context.get_filter_extension(filter_identifier)
 			assert(filter_extension)
 
 			node = FilterNode.new()
 			node.with_extension(filter_extension)
 			node.with_subject(subject)
-			#node.children.append(subject)
-			#node.children.append(literal_identifier_node)
 			if context.match_type(Token.Types.EXPRESSION_GROUP_OPENER):
-				node.children.append(parse_expressions(context))
+				node.with_parameters(parse_expressions(context))
 				context.consume_type(Token.Types.EXPRESSION_GROUP_CLOSER)
-			#node = (
-				#FilterNode.new()
-				#.with_child(subject)
-			#)
+
 		return node
 
 
