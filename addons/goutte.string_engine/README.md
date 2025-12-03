@@ -48,11 +48,23 @@ You are not allowed to vote yet, hatchling.
 {% endif %}
 ```
 
-## Filters
+### Filters
 
-### round
+#### abs
 
-The round filter rounds a number to a given precision:
+The `abs` filter returns the absolute value.
+
+```twig
+{# number = -7 #}
+
+{{ number|abs }}
+
+{# outputs 7 #}
+```
+
+#### round
+
+The `round` filter rounds a number to a given precision:
 
 ```twig
 {{ 2.55|round }}
@@ -63,8 +75,8 @@ The round filter rounds a number to a given precision:
 ```
 
 The round filter takes two optional arguments;
-the first one specifies the precision (default is 0)
-and the second the rounding method (default is common):
+the first one specifies the precision _(default is `0`)_
+and the second the rounding method _(default is `common`)_:
 
 - `common` rounds either up or down (rounds the value up to precision decimal places away from zero, when it is half way there -- making 1.5 into 2 and -1.5 into -2);
 - `ceil` always rounds up;

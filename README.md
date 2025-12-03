@@ -195,7 +195,7 @@ Then, enable the plugin in `Scene > Project Settings > Plugins`.
 Documentation
 -------------
 
-Please see the [addons' README](./addons/goutte.string-engine/README.md).
+Please see the [addons' README](./addons/goutte.string_engine/README.md).
 
 
 -----

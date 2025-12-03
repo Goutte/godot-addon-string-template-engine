@@ -9,14 +9,18 @@ signal test_ended(test_name: String, test_filepath: String)
 signal logged(message: String)
 
 
+var elapsed_usec := 0
+
+
 func _ready() -> void:
 	run_tests()
 
 
 func run_tests() -> void:
-	info("Running tests…")
+	self.elapsed_usec = 0
+	info("Running all tests…")
 	run_tests_directory("res://tests")
-	info("Done")
+	info("Done in %.3f ms" % [self.elapsed_usec * 0.001])
 
 
 func run_tests_directory(dirpath: String) -> void:
@@ -50,6 +54,7 @@ func run_test_method(method: Dictionary, script: GDScript) -> void:
 	test_ended.emit(method['name'], filepath)
 	info("\tTook %.3f ms" % [(ended_at_usec-started_at_usec)*0.001])
 	
+	self.elapsed_usec += (ended_at_usec - started_at_usec)
 	script_instance.free()
 
 

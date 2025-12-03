@@ -1301,6 +1301,22 @@ class PropertyAccessorNode:
 		return serialize_self(context)
 
 
+class EchoNode:
+	extends SyntaxNode
+	@export var expression: ExpressionNode
+
+	func with_expression(value: ExpressionNode) -> EchoNode:
+		self.expression = value
+		self.children.append(value)
+		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		return self.expression.evaluate(context)
+
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
 class FilterNode:
 	extends ExpressionNode
 	@export var extension: FilterExtension
@@ -1342,19 +1358,6 @@ class FilterNode:
 		#return self
 
 
-class EchoNode:
-	extends SyntaxNode
-	# FIXME just use self.children with only one child allowed instead of this ?
-	@export var expression: ExpressionNode
-
-	func with_expression(value: ExpressionNode) -> EchoNode:
-		self.expression = value
-		return self
-
-	func serialize(context: VisitorContext) -> String:
-		return self.expression.serialize(context)
-
-
 class StatementNode:
 	extends SyntaxNode
 	@export var extension: StatementExtension
@@ -1363,12 +1366,11 @@ class StatementNode:
 		self.extension = value
 		return self
 
-	# TODO
-	#func evaluate(context: VisitorContext) -> Variant:
-		#return self.extension.evaluate(context, self)
+	func evaluate(context: VisitorContext) -> Variant:
+		return self.extension.evaluate(context, self)
 
 	func serialize(context: VisitorContext) -> String:
-		return self.extension.serialize(context, self)
+		return serialize_self(context)
 
 #endregion
 
@@ -1437,18 +1439,11 @@ class RoundFilterExtension:
 	func evaluate(context: VisitorContext, node: FilterNode) -> Variant:
 		var value: float = node.subject.evaluate(context)
 		var precision := 0
-		match node.children.size():
-			0:
-				breakpoint  # subject missing?
-			1:
-				pass
-			2:
-				precision = node.parameters.children[0].evaluate(context)
-			3:
-				breakpoint  # what ?!?
 
 		var method := 'common'
 		if node.parameters:
+			if node.parameters.children.size() > 0:
+				precision = int(node.parameters.children[0].evaluate(context))
 			if node.parameters.children.size() > 1:
 				method = str(node.parameters.children[1].evaluate(context))
 
@@ -1461,7 +1456,7 @@ class RoundFilterExtension:
 			'common':
 				value = roundf(value * shift) / shift
 			_:
-				breakpoint
+				breakpoint  # unknown rounding method
 				value = roundf(value * shift) / shift
 
 		if precision == 0:

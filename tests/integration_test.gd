@@ -38,7 +38,6 @@ func test_a_bunch_of_rules() -> void:
 			},
 			&'expected': "Bonjour !",
 		},
-
 		{
 			# NOTE: Use {% verbatim %} … {% endverbatim %} instead to "escape"
 			&'rule': "Backslashes do NOT escape instructions",
@@ -53,49 +52,10 @@ func test_a_bunch_of_rules() -> void:
 			use \\Addons\\StringEngine;
 			""",
 		},
-
-		{
-			&'rule': "Handle error with unfinished print statement",
-			&'template': """
-			Hoho
-			{{ title     {{ description }}"
-			""",
-			&'variables': {
-				&'title': "Excession",
-				&'description': "",
-			},
-			&'expected_error': "Expected closer token `}}`, got `{{` instead.\nAt line 3",
-		},
-		{
-			&'rule': "Handle error with unfinished print statement",
-			&'template': """
-			Name: {{ "Georges"
-			Items: {{ items }}
-			""",
-			&'variables': {
-				&'items': [],
-			},
-			&'expected_error': "Expected closer token `}}`, got `: ` instead.\nAt line 3",
-		},
-		{
-			&'rule': "Handle error with unfinished if/then statement",
-			&'template': """
-			{% if condition %}
-			In the ancient glade
-			Across old bark
-			The quiet shade
-			It's always dark
-			""",
-			&'variables': {
-				&'condition': true,
-			},
-			&'expected_error': "Expected an {% endif %} at some point to close the {% if … %} found at line 2, but did not find it.\nAt line 2",
-		},
 	]
 	for datum: Dictionary in data:
 		process_datum(datum)
 	#print("\tRan %d subtests" % data.size())
-
 
 #region Comment with {# … #}
 func test_comments() -> void:
@@ -999,6 +959,51 @@ func test_filters_upper_lower() -> void:
 			æûœéèçà
 			FALSE
 			""",
+		},
+	]
+	for datum: Dictionary in data:
+		process_datum(datum)
+#endregion
+
+#region Handling errors
+func test_handling_errors() -> void:
+	var data := [
+		{
+			&'rule': "Handle error with unfinished print statement",
+			&'template': """
+			Hoho
+			{{ title     {{ description }}"
+			""",
+			&'variables': {
+				&'title': "Excession",
+				&'description': "",
+			},
+			&'expected_error': "Expected closer token `}}`, got `{{` instead.\nAt line 3",
+		},
+		{
+			&'rule': "Handle error with unfinished print statement",
+			&'template': """
+			Name: {{ "Georges"
+			Items: {{ items }}
+			""",
+			&'variables': {
+				&'items': [],
+			},
+			&'expected_error': "Expected closer token `}}`, got `: ` instead.\nAt line 3",
+		},
+		{
+			&'rule': "Handle error with unfinished if/then statement",
+			&'template': """
+			{% if condition %}
+			In the ancient glade
+			Across old bark
+			The quiet shade
+			It's always dark
+			""",
+			&'variables': {
+				&'condition': true,
+			},
+			&'expected_error': "Expected an {% endif %} at some point to close the {% if … %} found at line 2, but did not find it.\nAt line 2",
 		},
 	]
 	for datum: Dictionary in data:
