@@ -2,6 +2,9 @@
 extends EditorPlugin
 
 
+var stsh: StringTemplateSyntaxHighlighter
+
+
 func _enable_plugin() -> void:
 	# Add autoloads here.
 	pass
@@ -13,10 +16,11 @@ func _disable_plugin() -> void:
 
 
 func _enter_tree() -> void:
-	# Initialization of the plugin goes here.
-	pass
+	stsh = StringTemplateSyntaxHighlighter.new()
+	EditorInterface.get_script_editor().register_syntax_highlighter(stsh)
 
 
 func _exit_tree() -> void:
-	# Clean-up of the plugin goes here.
-	pass
+	if is_instance_valid(stsh):
+		EditorInterface.get_script_editor().unregister_syntax_highlighter(stsh)
+	stsh = null

@@ -78,6 +78,63 @@ func test_comments() -> void:
 	for datum: Dictionary in data:
 		process_datum(datum)
 #endregion
+#region Print with {{ … }}
+func test_print() -> void:
+	var data := [
+		{
+			&'rule': "Print a variable with {{ … }}",
+			&'template': "Hello {{ name }}!",
+			&'variables': {
+				&'name': 'Godette',
+			},
+			&'expected': "Hello Godette!",
+		},
+		{
+			&'rule': "Accept unicode runes as values",
+			&'template': "Hello {{ surname }} {{ name }}{{ emote }}!",
+			&'variables': {
+				&'surname': "🤖 Godot's",
+				&'name': "Community ♥",
+				&'emote': "♥",
+			},
+			&'expected': "Hello 🤖 Godot's Community ♥♥!",
+		},
+		# NOTE: this is tedious to make safe, especially without regex's \p{…}
+		#{
+			#&'rule': "Allow unicode runes in identifiers",
+			#&'template': """
+			#🥳 with 🦊 like {{ 🦋 }}
+			#""",
+			#&'variables': {
+				#&'🦋': "🦺",
+			#},
+			#&'expected': """
+			#🥳 with 🦊 like 🦺
+			#""",
+		#},
+		{
+			&'rule': "Accept multiline templates",
+			&'template': """
+			Hello {{ name }},
+			I hope this email finds you well.
+			
+			{{ greetings }}, yours truly.
+			""",
+			&'variables': {
+				&'name': "Pierrot",
+				&'greetings': "Cordially",
+			},
+			&'expected': """
+			Hello Pierrot,
+			I hope this email finds you well.
+			
+			Cordially, yours truly.
+			""",
+		},
+	]
+	for datum: Dictionary in data:
+		process_datum(datum)
+#endregion
 #region Accessors
 func test_accessors() -> void:
 	var data := [
@@ -442,57 +499,25 @@ func test_boolean_logic() -> void:
 	for datum: Dictionary in data:
 		process_datum(datum)
 #endregion
-#region Print with {{ … }}
-func test_print() -> void:
+#region Concatenation
+func test_concatenation() -> void:
 	var data := [
 		{
-			&'rule': "Print a variable with {{ … }}",
-			&'template': "Hello {{ name }}!",
-			&'variables': {
-				&'name': 'Godette',
-			},
-			&'expected': "Hello Godette!",
-		},
-		{
-			&'rule': "Accept unicode runes as values",
-			&'template': "Hello {{ surname }} {{ name }}{{ emote }}!",
-			&'variables': {
-				&'surname': "🤖 Godot's",
-				&'name': "Community ♥",
-				&'emote': "♥",
-			},
-			&'expected': "Hello 🤖 Godot's Community ♥♥!",
-		},
-		# NOTE: this is tedious to make safe, especially without regex's \p{…}
-		#{
-			#&'rule': "Allow unicode runes in identifiers",
-			#&'template': """
-			#🥳 with 🦊 like {{ 🦋 }}
-			#""",
-			#&'variables': {
-				#&'🦋': "🦺",
-			#},
-			#&'expected': """
-			#🥳 with 🦊 like 🦺
-			#""",
-		#},
-		{
-			&'rule': "Accept multiline templates",
+			&'rule': "Concatenation using ~",
 			&'template': """
-			Hello {{ name }},
-			I hope this email finds you well.
-			
-			{{ greetings }}, yours truly.
+			{{ "a" ~ "" }}
+			{{ "a" ~ "b" }}
+			{{ "a" ~ "b" ~ "cdef" }}
+			{{ "a" ~ "b" ~ "cdef" | uppercase }}
+			{{ 1 ~ true ~ 0.0 ~ false }}
 			""",
-			&'variables': {
-				&'name': "Pierrot",
-				&'greetings': "Cordially",
-			},
+			&'variables': {},
 			&'expected': """
-			Hello Pierrot,
-			I hope this email finds you well.
-			
-			Cordially, yours truly.
+			a
+			ab
+			abcdef
+			abCDEF
+			1true0.0false
 			""",
 		},
 	]
@@ -913,6 +938,8 @@ func test_filter_round() -> void:
 			{{ 2.55|round(1, "common") }}
 			{{ 2.55|round(1, "floor") }}
 			{{ 2.55|round(1, "ceil") }}
+			
+			{{ -1.5|round }}
 			""",
 			&'variables': {},
 			&'expected': """
@@ -927,6 +954,8 @@ func test_filter_round() -> void:
 			2.6
 			2.5
 			2.6
+			
+			-2
 			""",
 		},
 	]

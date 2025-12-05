@@ -2,6 +2,9 @@
 
 ## Templates
 
+As a template designer, there are some rules you need to be aware of.
+Here's a list of the features available to you.
+
 ### Comments
 
 Let's start with the cluttering chatter we all love and hate: comments.
@@ -9,6 +12,7 @@ Let's start with the cluttering chatter we all love and hate: comments.
 ```twig
 {# Any text in here will be absent from the rendered template #}
 ```
+
 
 ### Printing
 
@@ -35,6 +39,7 @@ You can print any expression, not just variables:
 {{ 666 * 999 + 666 + 999 }}
 ```
 
+
 ### Control the Flow
 
 Using if/else statements you can decide to show some part or another of the template:
@@ -47,6 +52,7 @@ You are allowed to vote, citizen.
 You are not allowed to vote yet, hatchling.
 {% endif %}
 ```
+
 
 ### Filters
 
@@ -81,3 +87,8 @@ and the second the rounding method _(default is `common`)_:
 - `common` rounds either up or down (rounds the value up to precision decimal places away from zero, when it is half way there -- making 1.5 into 2 and -1.5 into -2);
 - `ceil` always rounds up;
 - `floor` always rounds down.
+
+
+### Operator Precedence
+
+We're tring to conform to the [operator precedence of Twig 4](https://twig.symfony.com/doc/3.x/templates.html#operators).

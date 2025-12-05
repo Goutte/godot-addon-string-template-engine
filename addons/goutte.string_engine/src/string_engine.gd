@@ -3,8 +3,8 @@
 class_name StringEngine
 extends RefCounted
 
-# WHY?: Generate shaders, dynamic dialogues, maybe even HTML…
-# TOO SLOW?: try the fast Ginja addon using a gdextension to wrap Inja.
+# WHY?  Generate shaders, dynamic dialogues, maybe even HTML…
+# TOO SLOW?  try the fast Ginja addon using a gdextension to wrap Inja.
 
 ## Clear a single newline if it immediately follows a statement.
 var clear_newline_after_statement := false
@@ -12,7 +12,7 @@ var clear_newline_after_statement := false
 var clear_newline_after_comment := false
 ## Clear a single newline if it immediately follows a print.
 var clear_newline_after_echo := false
-
+## If available, enter debug mode immediately when there's an error.
 var break_on_error := true
 
 ## Statement extensions used by the engine.
@@ -43,7 +43,6 @@ var filter_extensions: Array[FilterExtension] = [
 #class ErrorHandler:
 	#func handle_error(message: String) -> void:
 		#pass
-
 
 
 #region Data Structures
@@ -169,6 +168,7 @@ class Token:
 		OPERATOR_DIVISION,        ## /
 		OPERATOR_MODULO,          ## %  TODO Removed: conflicts with STATEMENT_CLOSER ; we use filters
 		OPERATOR_NOT,             ## !
+		OPERATOR_CONCATENATION,   ## ~
 		COMPARATOR_EQUAL,         ## ==
 		COMPARATOR_INEQUAL,       ## !=
 		COMPARATOR_LESS,          ## <
@@ -279,6 +279,7 @@ class Tokenizer:
 	const symbol_operator_division := '/'
 	const symbol_operator_modulo := '%'
 	const symbol_operator_not := '!'
+	const symbol_operator_concatenation := '~'
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='
 	const symbol_comparator_less_than := '<'
@@ -653,6 +654,7 @@ class Tokenizer:
 		if tokenize_operator_multiplication() == OK: return OK
 		if tokenize_operator_division() == OK: return OK
 		if tokenize_operator_modulo() == OK: return OK
+		if tokenize_operator_concatenation() == OK: return OK
 		if tokenize_comparator_equality() == OK: return OK
 		if tokenize_comparator_inequality() == OK: return OK  # before not
 		if tokenize_comparator_comparison() == OK: return OK
@@ -756,6 +758,12 @@ class Tokenizer:
 		return tokenize_symbol(
 			self.symbol_operator_modulo,
 			Token.Types.OPERATOR_MODULO,
+		)
+
+	func tokenize_operator_concatenation() -> Error:
+		return tokenize_symbol(
+			self.symbol_operator_concatenation,
+			Token.Types.OPERATOR_CONCATENATION,
 		)
 
 	func tokenize_comparator_equality() -> Error:
@@ -909,10 +917,11 @@ class Tokenizer:
 			message += "\n" + "At line %d" % [
 				token.starts_in_source_at_line
 			]
-		printerr(message)
 		var error := TemplateError.new()
 		error.message = message
 		errors.append(error)
+		
+		printerr(message)
 		if break_on_error:
 			assert(false, message)
 
@@ -983,7 +992,7 @@ class SyntaxNode:
 			#func(accu: String, child: SyntaxNode): return accu + child.serialize(context),
 			#"",
 		#)
-		# -^- which is faster ? (the bottom one is easier to read) -v-
+		# ↑↓ which is faster ? (the bottom one is easier to read)
 		var output := ""
 		for child: SyntaxNode in self.children:
 			output += child.serialize(context)
@@ -1019,8 +1028,6 @@ class RawDataNode:
 
 	func evaluate(_context: VisitorContext) -> Variant:
 		return self.data
-	#func serialize_self(_context: VisitorContext) -> String:
-		#return self.data
 
 
 class CommentNode:
@@ -1218,6 +1225,12 @@ class ModuloOperatorNode:
 		if (left is int) and (right is int):
 			return left % right
 		return fmod(float(left), float(right))
+
+
+class ConcatenationOperatorNode:
+	extends BinaryOperatorNode
+	func evaluate_binary(left: Variant, right: Variant) -> Variant:
+		return str(left) + str(right)
 
 
 @abstract
@@ -2060,7 +2073,7 @@ class Parser:
 		return node
 
 	func parse_comparison(context: ParserContext) -> ExpressionNode:
-		var node := parse_addition(context)
+		var node := parse_concatenation(context)
 		while (
 			context.match_type(Token.Types.COMPARATOR_LESS) or
 			context.match_type(Token.Types.COMPARATOR_LESS_EQUAL) or
@@ -2094,6 +2107,16 @@ class Parser:
 					)
 		return node
 
+	func parse_concatenation(context: ParserContext) -> ExpressionNode:
+		var node := parse_addition(context)
+		while context.match_type(Token.Types.OPERATOR_CONCATENATION):
+			node = (
+				ConcatenationOperatorNode.new()
+				.with_child(node)
+				.with_child(parse_concatenation(context))
+			)
+		return node
+
 	func parse_addition(context: ParserContext) -> ExpressionNode:
 		var node := parse_multiplication(context)
 		while (
@@ -2113,8 +2136,6 @@ class Parser:
 						.with_child(node)
 						.with_child(parse_addition(context))
 					)
-				_:
-					breakpoint
 		return node
 
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
@@ -2140,7 +2161,7 @@ class Parser:
 
 	func parse_modulo(context: ParserContext) -> ExpressionNode:
 		var node := parse_filter(context)
-		while (context.match_type(Token.Types.OPERATOR_MODULO)):
+		while context.match_type(Token.Types.OPERATOR_MODULO):
 			node = (
 				ModuloOperatorNode.new()
 				.with_child(node)

@@ -22,7 +22,7 @@ gdscript/warnings/exclude_addons=false
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/goutte_string_engine/plugin.cfg", "res://addons/goutte_test_runner/plugin.cfg")
+enabled=PackedStringArray("res://addons/goutte.string_engine/plugin.cfg", "res://addons/goutte.test_runner/plugin.cfg")
 
 [rendering]
 

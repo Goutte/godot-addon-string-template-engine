@@ -81,12 +81,12 @@ Features
 	- [x] arithmetic `+ - * / %`
 	- [x] comparison `== != < <= > >=`
 	- [x] combination `and or nand xor`
-	- [ ] concatenation `~`
+	- [x] concatenation `~`
 	- [x] arrays
-	- [ ] arrays' indices  `foo[4]`
+	- [ ] array index accessor  `foo[4]`
 	- [x] objects
 	- [x] objects' properties `person.name`
-	- [ ] objects' methods
+	- [ ] objects' methods `person.say("saperlipopette !")`
 	- [x] filters `|`
 	- [ ] constants like `TAU`
 - [ ] statements
@@ -147,7 +147,7 @@ Features
 	- [ ] reduce
 	- [ ] replace
 	- [ ] reverse
-	- [ ] round
+	- [x] round
 	- [ ] shuffle
 	- [ ] singular
 	- [ ] slice
@@ -180,7 +180,12 @@ Features
 - [ ] escaping tutorial
 - [ ] auto-escaping configuration ?
 - [ ] localization utils
-- [ ] syntax highlighting
+- [ ] integration in Godot
+	- [ ] Godot recognizes `*.tpl` files
+		- [x] in the File Explorer
+		- [ ] in the Open menu of the Code Editor
+	- [ ] Godot opens `*.tpl` files in the Code Editor
+	- [ ] syntax highlighting in the Code Editor
 
 
 Install
