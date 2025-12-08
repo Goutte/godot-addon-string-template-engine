@@ -20,9 +20,13 @@ config/icon="res://icon.svg"
 
 gdscript/warnings/exclude_addons=false
 
+[editor_overrides]
+
+docks/filesystem/textfile_extensions="txt,md,cfg,ini,log,json,yml,yaml,toml,xml,tpl"
+
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/goutte.test_runner/plugin.cfg")
+enabled=PackedStringArray("res://addons/goutte.string_engine/plugin.cfg", "res://addons/goutte.test_runner/plugin.cfg")
 
 [rendering]
 

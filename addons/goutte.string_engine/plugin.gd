@@ -26,6 +26,7 @@ func _disable_plugin() -> void:
 
 func _enter_tree() -> void:
 	stsh = StringTemplateSyntaxHighlighter.new()
+	stsh.editor_settings = EditorInterface.get_editor_settings()
 	EditorInterface.get_script_editor().register_syntax_highlighter(stsh)
 
 

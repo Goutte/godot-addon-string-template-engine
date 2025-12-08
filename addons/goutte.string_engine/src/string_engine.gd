@@ -2000,7 +2000,7 @@ class Parser:
 			#_:
 				#breakpoint  # implement your new "main" token type !
 
-		# Somewhat safe fallback ; should not happen anyway.
+		# Somewhat safe fallback ; should not happen, unless you hack around.
 		return RawDataNode.new().with_data("")
 
 	# Stratified Grammar for Expressions

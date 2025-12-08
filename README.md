@@ -181,10 +181,10 @@ Features
 - [ ] auto-escaping configuration ?
 - [ ] localization utils
 - [ ] integration in Godot
-	- [ ] Godot recognizes `*.tpl` files
+	- [x] Godot recognizes `*.tpl` files
 		- [x] in the File Explorer
-		- [ ] in the Open menu of the Code Editor
-	- [ ] Godot opens `*.tpl` files in the Code Editor
+		- [x] in the Open menu of the Code Editor
+	- [x] Godot opens `*.tpl` files in the Code Editor
 	- [ ] syntax highlighting in the Code Editor
 
 
@@ -195,6 +195,7 @@ The installation is as usual, through the Assets Library.
 You can also simply copy the `addons/` files of this project into yours, it should work.
 
 Then, enable the plugin in `Scene > Project Settings > Plugins`.
+Finally, restart Godot's Editor, or the Filesystem dock won't show the `tpl` files.
 
 
 Documentation
