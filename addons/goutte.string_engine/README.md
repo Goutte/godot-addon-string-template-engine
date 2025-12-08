@@ -1,9 +1,13 @@
 # Documentation
 
+> Missing something ?  _Contribute it !_
+
+
 ## Templates
 
 As a template designer, there are some rules you need to be aware of.
 Here's a list of the features available to you.
+
 
 ### Comments
 
@@ -36,16 +40,22 @@ Hello World!
 You can print any expression, not just variables:
 
 ```twig
-{{ 666 * 999 + 666 + 999 }}
+{{ 666 + 666 * 999 + 999 }}
+
+{# outputs 666999 #}
 ```
 
 
 ### Control the Flow
 
+
+#### If/Else
+
 Using if/else statements you can decide to show some part or another of the template:
 
 ```twig
 Your name is {{ person.name }}.
+
 {% if current_year - person.birthday.year >= 16 %}
 You are allowed to vote, citizen.
 {% else %}
@@ -55,6 +65,7 @@ You are not allowed to vote yet, hatchling.
 
 
 ### Filters
+
 
 #### abs
 
@@ -67,6 +78,19 @@ The `abs` filter returns the absolute value.
 
 {# outputs 7 #}
 ```
+
+
+#### lowercase
+
+The `lowercase` (`lower` for short) lowercases a string.
+
+```twig
+{{ "MON ŒUF A CRIÉ."|lower }}
+{# outputs mon œuf a crié. #}
+```
+
+> Internally, we use `String.to_lower()`.
+
 
 #### round
 
@@ -87,6 +111,18 @@ and the second the rounding method _(default is `common`)_:
 - `common` rounds either up or down (rounds the value up to precision decimal places away from zero, when it is half way there -- making 1.5 into 2 and -1.5 into -2);
 - `ceil` always rounds up;
 - `floor` always rounds down.
+
+
+#### uppercase
+
+The `uppercase` (`upper` for short) uppercases a string.
+
+```twig
+{{ "Mon œuf a crié."|upper }}
+{# outputs MON ŒUF A CRIÉ. #}
+```
+
+> Internally, we use `String.to_upper()`.
 
 
 ### Operator Precedence
