@@ -5,18 +5,35 @@
 ## NOTE: this needs to be a global class (Godot auto-detects loaders)
 @tool
 class_name StringTemplateFormatLoader
-extends ResourceFormatLoader
+#extends ResourceFormatLoader
 
 func _get_recognized_extensions():
 	return ['tpl']
 
+func _handles_type(type: StringName) -> bool:
+	return type == &'StringTemplateResource'
+
+func _get_resource_type(path: String) -> String:
+	if path.get_extension() == 'tpl':
+		return 'StringTemplateResource'
+	return ''
+
 func _load(path: String, original_path: String, use_sub_threads: bool, cache_mode: int) -> Variant:
+	print("Custom TPL loading of " + path)
 	var content := FileAccess.get_file_as_string(path)
+	
+	# ERROR: Script is abstract
 	#var s := Script.new()
 	#s.source_code = content
-	print("WHAT?! "+path)
 	#return content
 	
+	# ERROR: Condition "res.is_null()" is true. Returning: ERR_CANT_OPEN
+	#return content
+	
+	#var se := StringTemplateScript.new()
+	#se.source_code = content
+	#return se
+	
 	var r := StringTemplateResource.new()
-	r.source = content
+	r.text = content
 	return r

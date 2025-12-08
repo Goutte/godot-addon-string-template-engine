@@ -1,9 +1,8 @@
-[gd_scene load_steps=3 format=3 uid="uid://doqynoyvb7t3t"]
+[gd_scene load_steps=2 format=3 uid="uid://doqynoyvb7t3t"]
 
 [ext_resource type="Script" uid="uid://bnj4vf2k7mgks" path="res://addons/goutte.test_runner/scenes/run_tests.gd" id="1_nmeri"]
-[ext_resource type="Script" uid="uid://duh78b75x007t" path="res://addons/goutte.test_runner/scripts/tests_runner.gd" id="1_tel50"]
 
-[node name="RunTests" type="Control" node_paths=PackedStringArray("runner", "logger")]
+[node name="RunTests" type="Control" node_paths=PackedStringArray("logger")]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,11 +10,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_nmeri")
-runner = NodePath("TestsRunner")
 logger = NodePath("Panel/MarginContainer/Logger")
-
-[node name="TestsRunner" type="Node" parent="."]
-script = ExtResource("1_tel50")
 
 [node name="Panel" type="Panel" parent="."]
 layout_mode = 1
