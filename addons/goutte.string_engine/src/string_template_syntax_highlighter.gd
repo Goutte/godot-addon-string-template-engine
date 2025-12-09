@@ -1,13 +1,16 @@
 @tool
-class_name StringTemplateSyntaxHighlighter
 extends EditorSyntaxHighlighter
+## A syntax highlighter for string templates.
+class_name StringTemplateSyntaxHighlighter
 
 ## We need this dependency to grab colors from the editor theme.
 ## If instead we instantiate a new EditorSettings, we get the Godot2 theme.
 var editor_settings: EditorSettings
 
-#func _init() -> void:
-	#prints('_init() on', get_text_edit())
+## Local cache of the highlights, which is fully invalidated on each keystroke.
+## We invalidate this cache too much; there's room for improvements.
+var lines_highlights := []
+
 
 func _create() -> EditorSyntaxHighlighter:
 	var highlighter := StringTemplateSyntaxHighlighter.new()
@@ -17,21 +20,17 @@ func _create() -> EditorSyntaxHighlighter:
 func _get_name() -> String:
 	return tr("String Template")
 
+## This method is badly named ; it returns the supported **extensions**.
 func _get_supported_languages() -> PackedStringArray:
 	return ["tpl"]
 
+## The Code Editor is going to call this method a lot; for each line.
 func _get_line_syntax_highlighting(line: int) -> Dictionary:
-	#prints("_get_line_syntax_highlighting", line)
 	return lines_highlights[line]
-
-## This is called right before _update_cache, every time it seems.
-#func _clear_highlighting_cache() -> void:
-	#prints("_clear_highlighting_cache()")
 
 ## This is called multiple times (7) when the file is opened. (!?)
 ## This is not called when the text changes, but it is called on save.
 func _update_cache() -> void:
-	prints("Calling", self, "_update_cache()")
 	# NOTE: `text_changed` is emitted AFTER _get_line_syntax_highlighting()
 	# Hence we use the `lines_edited_from` signal, which is emitted before.
 	if not get_text_edit().lines_edited_from.is_connected(on_lines_edited):
@@ -39,12 +38,13 @@ func _update_cache() -> void:
 	collect_colors()
 	recompute_highlighting()
 
-
 ## This is called BEFORE _get_line_syntax_highlighting, yay!
 func on_lines_edited(_from_line: int, _to_line: int) -> void:
 	recompute_highlighting()
 
 
+## Names of the colors in the Editor Settings that we're using.
+## We're looking at the setting "text_editor/theme/highlighting/…"
 var editor_colors_to_collect := [
 	&'text_color',
 	&'comment_color',
@@ -55,8 +55,11 @@ var editor_colors_to_collect := [
 	&'keyword_color',
 	&'control_flow_keyword_color',
 	&'base_type_color',
+	&'engine_type_color',
+	&'member_variable_color',
 ]
-#var default_color := Color.WHITE
+# The default values defined below are never used in practice, since we load
+# the editor color values in these variables ; see collect_colors()
 var text_color := Color(0.803, 0.81, 0.822, 1.0)
 var comment_color := Color(0.804, 0.812, 0.824, 0.502)
 var symbol_color := Color(0.67, 0.79, 1.0, 1.0)
@@ -66,6 +69,8 @@ var function_color := Color(0.341, 0.702, 1.0, 1.0)
 var keyword_color := Color(1.0, 0.44, 0.52, 1.0)
 var control_flow_keyword_color := Color(1.0, 0.549, 0.8, 1.0)
 var base_type_color := Color(0.259, 1.0, 0.761, 1.0)
+var engine_type_color := Color(0.56, 1.0, 0.86, 1.0)
+var member_variable_color := Color(0.736, 0.88, 1.0, 1.0)
 
 
 func collect_colors() -> void:
@@ -80,8 +85,6 @@ func collect_colors() -> void:
 			)
 		)
 
-var lines_highlights := []
-
 func recompute_highlighting() -> void:
 	var text := get_text_edit().get_text()
 	
@@ -90,6 +93,7 @@ func recompute_highlighting() -> void:
 		lines_highlights.append({})
 	
 	var tokenizer := StringEngine.Tokenizer.new()
+	tokenizer.break_on_error = false
 	var tokens := tokenizer.tokenize(text)
 	
 	for token in tokens:
@@ -99,14 +103,16 @@ func recompute_highlighting() -> void:
 		
 		var color := text_color
 		match token.type:
+			StringEngine.Token.Types.RAW_DATA:
+				color = text_color
 			StringEngine.Token.Types.ECHO_OPENER:
 				color = base_type_color
 			StringEngine.Token.Types.ECHO_CLOSER:
 				color = base_type_color
 			StringEngine.Token.Types.STATEMENT_OPENER:
-				color = function_color
+				color = engine_type_color
 			StringEngine.Token.Types.STATEMENT_CLOSER:
-				color = function_color
+				color = engine_type_color
 			StringEngine.Token.Types.STATEMENT_IDENTIFIER:
 				color = control_flow_keyword_color
 			StringEngine.Token.Types.STATEMENT_ASSIGN:
@@ -161,6 +167,10 @@ func recompute_highlighting() -> void:
 				color = symbol_color
 			StringEngine.Token.Types.FILTER:
 				color = symbol_color
+			StringEngine.Token.Types.FILTER_IDENTIFIER:
+				color = function_color
+			StringEngine.Token.Types.LITERAL_IDENTIFIER:
+				color = member_variable_color
 			StringEngine.Token.Types.LITERAL_STRING:
 				color = string_color
 			StringEngine.Token.Types.LITERAL_INTEGER:
@@ -171,10 +181,7 @@ func recompute_highlighting() -> void:
 				color = keyword_color
 			StringEngine.Token.Types.LITERAL_BOOLEAN_FALSE:
 				color = keyword_color
-			#StringEngine.Token.Types.RAW_DATA:
-				#color = text_color
 		
 		lines_highlights[starts_at_line][starts_in_line_at] = {
 			'color': color,
 		}
-	#prints("lines", lines_highlights)

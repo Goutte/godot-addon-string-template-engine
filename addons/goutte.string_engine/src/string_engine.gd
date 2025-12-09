@@ -39,12 +39,6 @@ var filter_extensions: Array[FilterExtension] = [
 	UppercaseFilterExtension.new(),
 ]
 
-
-#class ErrorHandler:
-	#func handle_error(message: String) -> void:
-		#pass
-
-
 #region Data Structures
 
 ## A basic (and quite inefficient) view on a portion of a string.
@@ -156,6 +150,7 @@ class Token:
 		EXPRESSIONS_SEPARATOR,    ## ,
 		ACCESSOR_PROPERTY,        ## .
 		FILTER,                   ## |
+		FILTER_IDENTIFIER,        ## uppercase, round, abs…
 		LITERAL_IDENTIFIER,       ## ^[0-9a-zA-Z_]+$  (roughly)
 		LITERAL_BOOLEAN_TRUE,     ## true
 		LITERAL_BOOLEAN_FALSE,    ## false
@@ -166,7 +161,7 @@ class Token:
 		OPERATOR_SUBTRACTION,     ## -
 		OPERATOR_MULTIPLICATION,  ## *
 		OPERATOR_DIVISION,        ## /
-		OPERATOR_MODULO,          ## %  TODO Removed: conflicts with STATEMENT_CLOSER ; we use filters
+		OPERATOR_MODULO,          ## %
 		OPERATOR_NOT,             ## !
 		OPERATOR_CONCATENATION,   ## ~
 		COMPARATOR_EQUAL,         ## ==
@@ -182,13 +177,13 @@ class Token:
 		# CONTAINOR_IN ?
 		INFIX_IN,                 ## in
 	}
-
+	
+	## The type of this token ; its most important property.
 	@export var type := Types.UNKNOWN
 	
 	## The raw, unadultered value found in the source template.
 	@export var literal := ""
 	
-	## FIXME: use this, maybe?
 	## The actual value we're going to use in the parser.
 	## Almost the same as the literal, but with some whitespace treatment.
 	@export var lexeme := ""
@@ -209,7 +204,6 @@ class Token:
 
 	func with_literal(value: String) -> Token:
 		self.literal = value
-		self.lexeme = value
 		return self
 
 	func with_lexeme(value: String) -> Token:
@@ -502,7 +496,7 @@ class Tokenizer:
 			if clear_whitespace_symbol and not self.tokens.is_empty():
 				var previous_token := self.tokens[-1]
 				if previous_token.type == Token.Types.RAW_DATA:
-					previous_token.literal = previous_token.literal.rstrip(
+					previous_token.lexeme = previous_token.lexeme.rstrip(
 						" \t" +
 						("\r\n" if clear_whitespace_symbol == '-' else '')
 					)
@@ -696,11 +690,31 @@ class Tokenizer:
 		return OK
 
 	func tokenize_filter() -> Error:
-		return tokenize_symbol(
+		#return tokenize_symbol(
+			#self.symbol_filter,
+			#Token.Types.FILTER,
+		#)
+		if tokenize_symbol(
 			self.symbol_filter,
 			Token.Types.FILTER,
-		)
+		) == OK:
+			consume_whitespaces_into_previous_token()
+			if tokenize_filter_identifier() == OK:
+				return OK
+			else:
+				raise_error("Expected a filter identifier after %s" % self.symbol_filter)
+				return OK
+		return ERR_INVALID_DATA
 
+	func tokenize_filter_identifier() -> Error:
+		var regex_match := self.source_view.rsearch_start(identifier_literal_regex)
+		if regex_match != null:
+			var whole_match := regex_match.get_string()
+			add_token(Token.Types.FILTER_IDENTIFIER, whole_match)
+			consume_source(whole_match.length())
+			return OK
+		return ERR_INVALID_DATA
+	
 	func tokenize_infix_in() -> Error:
 		return tokenize_symbol(
 			self.symbol_infix_in,
@@ -871,6 +885,7 @@ class Tokenizer:
 			Token.new()
 			.with_type(type)
 			.with_literal(literal)
+			.with_lexeme(literal)
 			.starting_at(self.source_view.start())
 			.starting_at_line(self.source_view.line())
 		)
@@ -1047,9 +1062,12 @@ class IdentifierLiteralNode:
 	@export var identifier: String
 
 	static func from_token(token: Token) -> IdentifierLiteralNode:
-		assert(token.type == Token.Types.LITERAL_IDENTIFIER)
+		assert(
+			token.type == Token.Types.LITERAL_IDENTIFIER or
+			token.type == Token.Types.FILTER_IDENTIFIER
+		)
 		var node := IdentifierLiteralNode.new()
-		node.identifier = token.literal
+		node.identifier = token.lexeme
 		node.tokens.append(token)
 		return node
 
@@ -1069,8 +1087,8 @@ class BooleanLiteralNode:
 		var node := BooleanLiteralNode.new()
 		node.value = truth
 		node.tokens.append(token)
-		assert(str(node.value) == token.literal, "%s != %s" % [
-			str(node.value), token.literal,
+		assert(str(node.value) == token.lexeme, "%s != %s" % [
+			str(node.value), token.lexeme,
 		])
 		return node
 
@@ -1084,14 +1102,14 @@ class IntegerLiteralNode:
 
 	static func from_token(token: Token) -> IntegerLiteralNode:
 		assert(token.type == Token.Types.LITERAL_INTEGER)
-		assert(token.literal.length() >= 1)
+		assert(token.lexeme.length() >= 1)
 		var node := IntegerLiteralNode.new()
-		if token.literal.to_lower().begins_with('0x'):
-			node.value = token.literal.hex_to_int()
-		elif token.literal.to_lower().begins_with('0b'):
-			node.value = token.literal.bin_to_int()
+		if token.lexeme.to_lower().begins_with('0x'):
+			node.value = token.lexeme.hex_to_int()
+		elif token.lexeme.to_lower().begins_with('0b'):
+			node.value = token.lexeme.bin_to_int()
 		else:
-			node.value = int(token.literal)
+			node.value = int(token.lexeme)
 		node.tokens.append(token)
 		return node
 
@@ -1105,14 +1123,10 @@ class FloatLiteralNode:
 
 	static func from_token(token: Token) -> FloatLiteralNode:
 		assert(token.type == Token.Types.LITERAL_FLOAT)
-		assert(token.literal.length() >= 2)
+		assert(token.lexeme.length() >= 2)
 		var node := FloatLiteralNode.new()
-		node.value = float(token.literal)
+		node.value = float(token.lexeme)
 		node.tokens.append(token)
-		# Commented because 1618.0 != 1.618e3
-		#assert(str(node.value) == token.literal, "%s != %s" % [
-			#str(node.value), token.literal,
-		#])
 		return node
 
 	func with_value(some_value: float) -> FloatLiteralNode:
@@ -1129,9 +1143,9 @@ class StringLiteralNode:
 
 	static func from_token(token: Token) -> StringLiteralNode:
 		assert(token.type == Token.Types.LITERAL_STRING)
-		assert(token.literal.length() >= 2)
+		assert(token.lexeme.length() >= 2)
 		var node := StringLiteralNode.new()
-		node.value = token.literal.substr(1, token.literal.length() - 2)
+		node.value = token.lexeme.substr(1, token.lexeme.length() - 2)
 		node.value = node.value.replace("\\\"", "\"")
 		node.value = node.value.replace("\\\\", "\\")
 		node.tokens.append(token)
@@ -1626,7 +1640,7 @@ class VerbatimStatementExtension:
 					&&
 					context.tokens[token_index+1].type == Token.Types.STATEMENT_IDENTIFIER
 					&&
-					context.tokens[token_index+1].literal == 'end' + get_identifier()
+					context.tokens[token_index+1].lexeme == 'end' + get_identifier()
 					&&
 					context.tokens[token_index+2].type == Token.Types.STATEMENT_CLOSER
 				)
@@ -1920,7 +1934,7 @@ class ParserContext:
 				return (
 					context.get_current_token(0).type == Token.Types.STATEMENT_OPENER and
 					context.get_current_token(1).type == Token.Types.STATEMENT_IDENTIFIER and
-					context.get_current_token(1).literal == identifier
+					context.get_current_token(1).lexeme == identifier
 				)
 		)
 	
@@ -1975,7 +1989,7 @@ class Parser:
 		var token: Token = context.consume_current_token()
 		match token.type:
 			Token.Types.RAW_DATA:
-				return RawDataNode.new().with_data(token.literal).with_token(token)
+				return RawDataNode.new().with_data(token.lexeme).with_token(token)
 			Token.Types.ECHO_OPENER:
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.ECHO_CLOSER):
@@ -1992,7 +2006,7 @@ class Parser:
 			Token.Types.STATEMENT_OPENER:
 				var identifier_token := context.consume_current_token()
 				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
-				var statement_extension := context.get_statement_extension(identifier_token.literal)
+				var statement_extension := context.get_statement_extension(identifier_token.lexeme)
 				return statement_extension.parse(self, context)
 			Token.Types.COMMENT_OPENER:
 				context.consume_some_tokens(2)
@@ -2173,7 +2187,7 @@ class Parser:
 		var node := parse_unary(context)
 		while context.match_type(Token.Types.FILTER):
 			var subject := node
-			var filter_identifier_node := parse_literal_identifier(context)
+			var filter_identifier_node := parse_filter_identifier(context)
 			var filter_identifier := filter_identifier_node.tokens[0].lexeme
 			var filter_extension := context.get_filter_extension(filter_identifier)
 			assert(filter_extension)
@@ -2250,6 +2264,12 @@ class Parser:
 			_:
 				raise_error(context, "Parser expected a literal, but got `%s`." % token)
 				return ExpressionNode.new()
+
+	func parse_filter_identifier(context: ParserContext) -> ExpressionNode:
+		var token := context.consume_current_token()
+		if token.type != Token.Types.FILTER_IDENTIFIER:
+			raise_error(context, "Expected a filter identifier, but got `%s`." % token, token)
+		return IdentifierLiteralNode.from_token(token)
 
 	func parse_literal_identifier(context: ParserContext) -> ExpressionNode:
 		var token := context.consume_current_token()
