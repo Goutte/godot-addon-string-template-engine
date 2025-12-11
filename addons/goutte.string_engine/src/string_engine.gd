@@ -190,6 +190,8 @@ class Token:
 	
 	@export var starts_in_source_at := 0  # 0-indexed
 	@export var starts_in_source_at_line := 0  # 1-indexed
+	@export var ends_in_source_at := 0  # 0-indexed
+	@export var ends_in_source_at_line := 0  # 1-indexed
 	@export var whitespaces_before := ""
 	@export var whitespaces_after := ""
 	
@@ -216,6 +218,14 @@ class Token:
 
 	func starting_at_line(index1: int) -> Token:
 		self.starts_in_source_at_line = index1
+		return self
+
+	func ending_at(index0: int) -> Token:
+		self.ends_in_source_at = index0
+		return self
+
+	func ending_at_line(index1: int) -> Token:
+		self.ends_in_source_at_line = index1
 		return self
 
 	func _to_string() -> String:
@@ -888,6 +898,8 @@ class Tokenizer:
 			.with_lexeme(literal)
 			.starting_at(self.source_view.start())
 			.starting_at_line(self.source_view.line())
+			.ending_at(self.source_view.start() + literal.length())
+			.ending_at_line(self.source_view.line() + literal.count('\n'))
 		)
 	
 	func add_raw_data_token(literal: String) -> void:

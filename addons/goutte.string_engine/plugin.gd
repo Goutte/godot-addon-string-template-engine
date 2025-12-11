@@ -9,8 +9,8 @@ extends EditorPlugin
 
 
 const string_list_separator := ','
-const editor_override_prefix := "editor_overrides"
-const textfiles_editor_setting := "docks/filesystem/textfile_extensions"
+const editor_override_prefix := 'editor_overrides'
+const textfiles_editor_setting := 'docks/filesystem/textfile_extensions'
 
 
 var stsh: StringTemplateSyntaxHighlighter

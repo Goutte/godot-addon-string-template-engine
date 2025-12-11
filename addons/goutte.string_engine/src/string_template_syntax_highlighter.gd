@@ -22,7 +22,7 @@ func _get_name() -> String:
 
 ## This method is badly named ; it returns the supported **extensions**.
 func _get_supported_languages() -> PackedStringArray:
-	return ["tpl"]
+	return ['tpl']
 
 ## The Code Editor is going to call this method a lot; for each line.
 func _get_line_syntax_highlighting(line: int) -> Dictionary:
@@ -100,6 +100,9 @@ func recompute_highlighting() -> void:
 		var starts_at_line := token.starts_in_source_at_line - 1
 		var line_starts_at := text.rfind("\n", token.starts_in_source_at-1) + 1
 		var starts_in_line_at := token.starts_in_source_at - line_starts_at
+		var ends_at_line := token.ends_in_source_at_line - 1
+		#var end_line_starts_at := text.rfind("\n", token.ends_in_source_at-1) + 1
+		#var ends_in_line_at := token.ends_in_source_at - end_line_starts_at
 		
 		var color := text_color
 		match token.type:
@@ -185,3 +188,10 @@ func recompute_highlighting() -> void:
 		lines_highlights[starts_at_line][starts_in_line_at] = {
 			'color': color,
 		}
+		
+		# Handle colorization of multiline tokens
+		if token.type != StringEngine.Token.Types.RAW_DATA:
+			for i in range(ends_at_line - starts_at_line):
+				lines_highlights[starts_at_line + i][0] = {
+					'color': color,
+				}
