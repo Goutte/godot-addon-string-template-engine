@@ -39,10 +39,10 @@ var filter_extensions: Array[FilterExtension] = [
 	UppercaseFilterExtension.new(),
 ]
 
-#region Data Structures
+#region Miscellaneous Data Structures
 
 ## A basic (and quite inefficient) view on a portion of a string.
-## The goal was/is to copy less strings.
+## The goal was/is to copy less strings, especially as templates can be big.
 ## But regex search using offset ignores anchors like `^`, so we copy anyway.
 ## Not when shrinking though, so it's still worth having this I think.
 class StringView:
@@ -62,7 +62,7 @@ class StringView:
 			optional_start = 0
 		self.__start = optional_start
 		if optional_length < 0:
-			optional_length = self.__string.length()
+			optional_length = __string.length()
 		self.__length = optional_length
 		sanitize_delimiters()
 
@@ -121,6 +121,24 @@ class StringView:
 	#func get_current() -> Token:
 		#return self.tokens[self.cursor]
 
+
+class TemplateError:
+	extends Resource
+	@export var message: String
+
+	func _to_string() -> String:
+		return self.message
+
+
+## This resource is the main output of the StringEngine.  See render().
+class RenderedTemplate:
+	extends Resource
+	@export var output: String
+	@export var errors: Array[TemplateError]
+	
+	func _to_string() -> String:
+		return self.output
+
 #endregion
 
 
@@ -132,12 +150,11 @@ class StringView:
 class Token:
 	extends Resource
 	enum Types {
-		UNKNOWN,                  ## Usually means there was a failure somewhere.
-		EOF,                      ## Token we get at the End Of File
-		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
-		# FIXME: PRINT → PRINT ?
-		PRINT_OPENER,              ## {{
-		PRINT_CLOSER,              ## }}
+		UNKNOWN,                  ## Means there was a failure somewhere.
+		EOF,                      ## Token we get at the End Of File.
+		RAW_DATA,                 ## Most of the stuff; all that is not our DSL.
+		PRINT_OPENER,             ## {{
+		PRINT_CLOSER,             ## }}
 		COMMENT_OPENER,           ## {#
 		COMMENT_CONTENT,          ## Anything except a comment closer.
 		COMMENT_CLOSER,           ## #}
@@ -162,6 +179,7 @@ class Token:
 		OPERATOR_MULTIPLICATION,  ## *
 		OPERATOR_DIVISION,        ## /
 		OPERATOR_MODULO,          ## %
+		# TODO: use 'not' instead of '!'
 		OPERATOR_NOT,             ## !
 		OPERATOR_CONCATENATION,   ## ~
 		COMPARATOR_EQUAL,         ## ==
@@ -174,7 +192,7 @@ class Token:
 		COMBINATOR_OR,            ## or
 		COMBINATOR_NAND,          ## nand
 		COMBINATOR_XOR,           ## xor
-		# CONTAINOR_IN ?
+		# TODO: rename CONTAINOR_IN ?
 		INFIX_IN,                 ## in
 	}
 	
@@ -196,6 +214,7 @@ class Token:
 	@export var whitespaces_after := ""
 	
 	# TODO: wouldn't it be faster/better to host these toggles in the tokenizer?
+	# It boils down to: Do we need to remember these once they've been applied?
 	var clear_newline_after := false
 	var clear_whitespaces_after := false
 	var clear_tabspaces_after := false
@@ -232,6 +251,7 @@ class Token:
 		return self.literal
 
 
+## The tokenizer reads the template string and produces a list of tokens.
 ## Probably closer to a Lexer now, as its states are kinda tied to our grammar.
 class Tokenizer:
 	extends RefCounted
@@ -239,7 +259,7 @@ class Tokenizer:
 	## Especially as we do not know anything in advance about the raw data.
 	enum States {
 		RAW_DATA,  ## Reading raw data, the starting/default state
-		PRINT,      ## Reading the expression inside of {{ … }}
+		PRINT,     ## Reading the expression inside of {{ … }}
 		STATEMENT, ## Reading the statement inside of {% … %}
 		COMMENT,   ## Reading the comment inside of {# … #}
 	}
@@ -1067,6 +1087,8 @@ class ExpressionNode:
 
 class ExpressionsNode:
 	extends SyntaxNode
+	func with_expressions(value: Array[SyntaxNode]) -> ExpressionsNode:
+		return with_children(value) as ExpressionsNode
 
 
 class IdentifierLiteralNode:
@@ -1785,7 +1807,7 @@ class WhileStatementExtension:
 #region Parsing
 
 ## Holds the context of a parser's run.
-## I thought we'd have to backtrack and therefore copy a context around,
+## I thought we'd have to backtrack and therefore copy a parser context around,
 ## but we don't backtrack, and therefore this is somewhat redundant with Parser.
 ## Not sure if we'll ever end up backtracking…
 ## This makes the API in statement extensions horrible.  Let's work on it.
@@ -1795,7 +1817,7 @@ class ParserContext:
 	var statement_extensions: Array[StatementExtension] = []
 	## All filters are implemented via Filter Extensions.
 	var filter_extensions: Array[FilterExtension] = []
-	## The parser this context is attached to.
+	## The parser instance this context is pertaining to.
 	var parser: Parser
 	## Our stream of tokens we're parsing.
 	var tokens: Array[Token]
@@ -1860,10 +1882,10 @@ class ParserContext:
 		return matched
 
 	func get_current_token(offset := 0) -> Token:
-		var offseted_index := self.current_token_index + offset
-		if offseted_index >= self.tokens.size():
+		var requested_index := self.current_token_index + offset
+		if requested_index >= self.tokens.size():
 			return Token.new().with_type(Token.Types.EOF)
-		if offseted_index < 0:
+		if requested_index < 0:
 			breakpoint
 			return Token.new()
 		return self.tokens[self.current_token_index + offset]
@@ -2019,28 +2041,24 @@ class Parser:
 	# ----------------------------------
 	# EXPRESSIONS = EXPRESSION ( "," EXPRESSION )*
 	# EXPRESSION = COMBINATION
-	# COMBINATION = EQUALITY ( ( "and" | "or" ) EQUALITY )*
-	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )*
+	# COMBINATION = EQUALITY ( ( "and" | "or" ) COMBINATION )?
+	# EQUALITY = COMPARISON ( ( "!=" | "==" ) COMPARISON )?
 	# COMPARISON = ADDITION ( ( "<=" | "<" | ">=" | ">" ) ADDITION )*
-	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) MULTIPLICATION )*
-	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MODULO )*
+	# ADDITION = MULTIPLICATION ( ( "+" | "-" ) ADDITION )*
+	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MULTIPLICATION )*
 	# MODULO = FILTER ( "%" FILTER )*
 	# FILTER = UNARY ( "|" FILTER_IDENTIFIER ( "(" EXPRESSIONS ")" )? )*
 	# UNARY = ( "+" | "-" | "!" ) UNARY
-	#       | SECONDARY
-	# SECONDARY = PRIMARY ( "." LITERAL_IDENTIFIER )*
+	#       | ACCESS_PROPERTY
+	# ACCESS_PROPERTY = PRIMARY ( "." LITERAL_IDENTIFIER )*
 	# PRIMARY = LITERAL
 	#         | LITERAL_IDENTIFIER
 	#         | "(" EXPRESSION ")"
 	func parse_expressions(context: ParserContext) -> ExpressionsNode:
-		var expressions_nodes: Array[SyntaxNode] = [
-			parse_expression(context),
-		]
-		while (
-			context.match_type(Token.Types.EXPRESSIONS_SEPARATOR)
-		):
+		var expressions_nodes: Array[SyntaxNode] = [parse_expression(context)]
+		while context.match_type(Token.Types.EXPRESSIONS_SEPARATOR):
 			expressions_nodes.append(parse_expression(context))
-		return ExpressionsNode.new().with_children(expressions_nodes) as ExpressionsNode
+		return ExpressionsNode.new().with_expressions(expressions_nodes)
 
 	func parse_expression(context: ParserContext) -> ExpressionNode:
 		assert(context.has_tokens_remaining(), "Expected an expression, but got nothing.")
@@ -2048,7 +2066,7 @@ class Parser:
 
 	func parse_combination(context: ParserContext) -> ExpressionNode:
 		var node := parse_equality(context)
-		while (
+		if (
 			context.match_type(Token.Types.COMBINATOR_AND) or
 			context.match_type(Token.Types.COMBINATOR_OR) or
 			context.match_type(Token.Types.COMBINATOR_NAND) or
@@ -2059,13 +2077,12 @@ class Parser:
 				.with_child(node)
 				.with_child(parse_combination(context))
 				.with_token(context.get_previous_token())  # /!. LAST! /!.
-				as CombinatorNode
-			)
+			) as CombinatorNode
 		return node
 
 	func parse_equality(context: ParserContext) -> ExpressionNode:
 		var node := parse_comparison(context)
-		while (
+		if (
 			context.match_type(Token.Types.COMPARATOR_EQUAL) or
 			context.match_type(Token.Types.COMPARATOR_INEQUAL)
 		):
@@ -2074,19 +2091,19 @@ class Parser:
 					node = (
 						EqualityComparatorNode.new()
 						.with_child(node)
-						.with_child(parse_equality(context))
-					)
+						.with_child(parse_comparison(context))
+					) as EqualityComparatorNode
 				Token.Types.COMPARATOR_INEQUAL:
 					node = (
 						InequalityComparatorNode.new()
 						.with_child(node)
-						.with_child(parse_equality(context))
-					)
+						.with_child(parse_comparison(context))
+					) as InequalityComparatorNode
 		return node
 
 	func parse_comparison(context: ParserContext) -> ExpressionNode:
 		var node := parse_concatenation(context)
-		while (
+		if (
 			context.match_type(Token.Types.COMPARATOR_LESS) or
 			context.match_type(Token.Types.COMPARATOR_LESS_EQUAL) or
 			context.match_type(Token.Types.COMPARATOR_GREATER) or
@@ -2098,25 +2115,25 @@ class Parser:
 						LessComparatorNode.new()
 						.with_child(node)
 						.with_child(parse_comparison(context))
-					)
+					) as LessComparatorNode
 				Token.Types.COMPARATOR_LESS_EQUAL:
 					node = (
 						LessOrEqualComparatorNode.new()
 						.with_child(node)
 						.with_child(parse_comparison(context))
-					)
+					) as LessOrEqualComparatorNode
 				Token.Types.COMPARATOR_GREATER:
 					node = (
 						GreaterComparatorNode.new()
 						.with_child(node)
 						.with_child(parse_comparison(context))
-					)
+					) as GreaterComparatorNode
 				Token.Types.COMPARATOR_GREATER_EQUAL:
 					node = (
 						GreaterOrEqualComparatorNode.new()
 						.with_child(node)
 						.with_child(parse_comparison(context))
-					)
+					) as GreaterOrEqualComparatorNode
 		return node
 
 	func parse_concatenation(context: ParserContext) -> ExpressionNode:
@@ -2335,21 +2352,12 @@ class EvaluatorVisitor:
 #endregion
 
 
-class TemplateError:
-	extends Resource
-	@export var message: String
-
-class RenderedTemplate:
-	extends Resource
-	@export var output: String
-	@export var errors: Array[TemplateError]
-
 
 ## Renders a source template using the variables.
 ## This is the main method of the string template engine.
 func render(source: String, variables: Dictionary) -> RenderedTemplate:
-
 	var errors: Array[TemplateError] = []
+	
 	var tokenizer := Tokenizer.new()
 	tokenizer.clear_newline_after_statement = self.clear_newline_after_statement
 	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
