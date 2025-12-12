@@ -12,6 +12,7 @@ config_version=5
 
 config/name="String Template Engine"
 config/description="Development environment of a String Template Engine in for Godot 4.5+, written in gdscript."
+config/tags=PackedStringArray("addon")
 run/main_scene="uid://doqynoyvb7t3t"
 config/features=PackedStringArray("4.5", "GL Compatibility")
 config/icon="res://icon.svg"

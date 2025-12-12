@@ -11,7 +11,7 @@ var clear_newline_after_statement := false
 ## Clear a single newline if it immediately follows a comment.
 var clear_newline_after_comment := false
 ## Clear a single newline if it immediately follows a print.
-var clear_newline_after_echo := false
+var clear_newline_after_print := false
 ## If available, enter debug mode immediately when there's an error.
 var break_on_error := true
 
@@ -135,9 +135,9 @@ class Token:
 		UNKNOWN,                  ## Usually means there was a failure somewhere.
 		EOF,                      ## Token we get at the End Of File
 		RAW_DATA,                 ## Most of the stuff in the source; all that is not our DSL.
-		# FIXME: ECHO → PRINT ?
-		ECHO_OPENER,              ## {{
-		ECHO_CLOSER,              ## }}
+		# FIXME: PRINT → PRINT ?
+		PRINT_OPENER,              ## {{
+		PRINT_CLOSER,              ## }}
 		COMMENT_OPENER,           ## {#
 		COMMENT_CONTENT,          ## Anything except a comment closer.
 		COMMENT_CLOSER,           ## #}
@@ -239,7 +239,7 @@ class Tokenizer:
 	## Especially as we do not know anything in advance about the raw data.
 	enum States {
 		RAW_DATA,  ## Reading raw data, the starting/default state
-		ECHO,      ## Reading the expression inside of {{ … }}
+		PRINT,      ## Reading the expression inside of {{ … }}
 		STATEMENT, ## Reading the statement inside of {% … %}
 		COMMENT,   ## Reading the comment inside of {# … #}
 	}
@@ -247,7 +247,7 @@ class Tokenizer:
 	# Public configuration
 	var clear_newline_after_statement := false
 	var clear_newline_after_comment := false
-	var clear_newline_after_echo := false
+	var clear_newline_after_print := false
 	
 	## This is always false in exported builds, as they have no breakpoints.
 	## We use this to assert stuff about our errors in the test suite.
@@ -255,8 +255,8 @@ class Tokenizer:
 	
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
-	var symbol_echo_opener := '{{'
-	var symbol_echo_closer := '}}'
+	var symbol_print_opener := '{{'
+	var symbol_print_closer := '}}'
 	var symbol_comment_opener := '{#'
 	var symbol_comment_closer := '#}'
 	var symbol_statement_opener := '{%'
@@ -314,7 +314,7 @@ class Tokenizer:
 	var string_literal_regex: RegEx
 	var whitespaces_regex: RegEx
 	var openers_regex: RegEx
-	var echo_closer_regex: RegEx
+	var print_closer_regex: RegEx
 	var comment_closer_regex: RegEx
 	var statement_closer_regex: RegEx
 
@@ -381,7 +381,7 @@ class Tokenizer:
 		self.openers_regex = RegEx.new()
 		has_compiled = self.openers_regex.compile(
 			"(?<symbol>" +
-			escape_for_regex(self.symbol_echo_opener) +
+			escape_for_regex(self.symbol_print_opener) +
 			"|" +
 			escape_for_regex(self.symbol_statement_opener) +
 			"|" +
@@ -413,10 +413,10 @@ class Tokenizer:
 				"(?<symbol>" + escape_for_regex(symbol) + ")"
 			)
 
-		self.echo_closer_regex = RegEx.new()
+		self.print_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
-			self.echo_closer_regex,
-			self.symbol_echo_closer,
+			self.print_closer_regex,
+			self.symbol_print_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of }} is broken.")
 
@@ -446,12 +446,12 @@ class Tokenizer:
 				States.RAW_DATA:
 					# Let's consume as raw data until we find any opener.
 					tokenize_raw_data()
-				States.ECHO:
+				States.PRINT:
 					# At this point we have consumed the {{ opener already.
 					consume_whitespaces_into_previous_token()
 					tokenize_expression()
 					consume_whitespaces_into_previous_token()
-					tokenize_echo_closer()
+					tokenize_print_closer()
 					set_state(States.RAW_DATA)
 				States.STATEMENT:
 					# At this point we have consumed the {% opener already.
@@ -512,9 +512,9 @@ class Tokenizer:
 					)
 
 			match opener_symbol:
-				symbol_echo_opener:
-					add_token(Token.Types.ECHO_OPENER, whole_match)
-					set_state(States.ECHO)
+				symbol_print_opener:
+					add_token(Token.Types.PRINT_OPENER, whole_match)
+					set_state(States.PRINT)
 				symbol_statement_opener:
 					add_token(Token.Types.STATEMENT_OPENER, whole_match)
 					set_state(States.STATEMENT)
@@ -540,13 +540,13 @@ class Tokenizer:
 			add_token(Token.Types.COMMENT_CONTENT, comment_contents)
 			consume_source(match_start)
 
-	func tokenize_echo_closer() -> Error:
+	func tokenize_print_closer() -> Error:
 		var status := tokenize_closer(
-			self.symbol_echo_closer,
-			Token.Types.ECHO_CLOSER,
-			self.echo_closer_regex,
+			self.symbol_print_closer,
+			Token.Types.PRINT_CLOSER,
+			self.print_closer_regex,
 		)
-		if status == OK and self.clear_newline_after_echo:
+		if status == OK and self.clear_newline_after_print:
 			mark_next_newline_for_clearing()
 		return status
 
@@ -643,7 +643,7 @@ class Tokenizer:
 		# Therefore, we need this expensive forward scan for closer symbols.
 		if (
 			scan_regex(self.statement_closer_regex) or
-			scan_regex(self.echo_closer_regex)
+			scan_regex(self.print_closer_regex)
 		):
 			return ERR_OUT_OF_MEMORY
 		
@@ -1340,11 +1340,11 @@ class PropertyAccessorNode:
 		return serialize_self(context)
 
 
-class EchoNode:
+class PrintNode:
 	extends SyntaxNode
 	@export var expression: ExpressionNode
 
-	func with_expression(value: ExpressionNode) -> EchoNode:
+	func with_expression(value: ExpressionNode) -> PrintNode:
 		self.expression = value
 		self.children.append(value)
 		return self
@@ -1381,20 +1381,6 @@ class FilterNode:
 
 	func serialize(context: VisitorContext) -> String:
 		return serialize_self(context)
-
-
-#class StatementIdentifierNode:
-	#extends LiteralIdentifierNode
-	#@export var identifier: String
-	#func with_identifier(value: String) -> StatementIdentifierNode:
-		#self.identifier = value
-		#return self
-#class VariableIdentifierNode:
-	#extends ExpressionNode
-	#@export var identifier: String
-	#func with_identifier(value: String) -> StatementIdentifierNode:
-		#self.identifier = value
-		#return self
 
 
 class StatementNode:
@@ -2002,19 +1988,19 @@ class Parser:
 		match token.type:
 			Token.Types.RAW_DATA:
 				return RawDataNode.new().with_data(token.lexeme).with_token(token)
-			Token.Types.ECHO_OPENER:
+			Token.Types.PRINT_OPENER:
 				var expression: ExpressionNode = parse_expression(context)
-				if not context.match_type(Token.Types.ECHO_CLOSER):
+				if not context.match_type(Token.Types.PRINT_CLOSER):
 					if context.has_tokens_remaining():
 						raise_error(context, "Expected }}, but got something else: %s" % context.get_current_token())
 					else:
 						raise_error(context, "Expected }}, but found the end of the document.")
 
-				var echo_tokens: Array[Token] = []  # FIXME
-				#echo_tokens.append(token)
-				#echo_tokens.append_array(tokens_subset)
-				#echo_tokens.append(context.get_current_token(-1))
-				return EchoNode.new().with_expression(expression).with_tokens(echo_tokens)
+				var print_tokens: Array[Token] = []  # FIXME
+				#print_tokens.append(token)
+				#print_tokens.append_array(tokens_subset)
+				#print_tokens.append(context.get_current_token(-1))
+				return PrintNode.new().with_expression(expression).with_tokens(print_tokens)
 			Token.Types.STATEMENT_OPENER:
 				var identifier_token := context.consume_current_token()
 				assert(identifier_token.type == Token.Types.STATEMENT_IDENTIFIER, "Expected statement identifier")
@@ -2367,7 +2353,7 @@ func render(source: String, variables: Dictionary) -> RenderedTemplate:
 	var tokenizer := Tokenizer.new()
 	tokenizer.clear_newline_after_statement = self.clear_newline_after_statement
 	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
-	tokenizer.clear_newline_after_echo = self.clear_newline_after_echo
+	tokenizer.clear_newline_after_print = self.clear_newline_after_print
 	tokenizer.break_on_error = self.break_on_error
 	var tokens := tokenizer.tokenize(source)
 	errors.append_array(tokenizer.errors)

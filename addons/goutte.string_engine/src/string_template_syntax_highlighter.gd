@@ -108,9 +108,9 @@ func recompute_highlighting() -> void:
 		match token.type:
 			StringEngine.Token.Types.RAW_DATA:
 				color = text_color
-			StringEngine.Token.Types.ECHO_OPENER:
+			StringEngine.Token.Types.PRINT_OPENER:
 				color = base_type_color
-			StringEngine.Token.Types.ECHO_CLOSER:
+			StringEngine.Token.Types.PRINT_CLOSER:
 				color = base_type_color
 			StringEngine.Token.Types.STATEMENT_OPENER:
 				color = engine_type_color

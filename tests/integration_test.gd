@@ -383,7 +383,7 @@ func test_whitespace_handling() -> void:
 			""",
 		},
 		{
-			&'rule': "Option to clear a newline after echo",
+			&'rule': "Option to clear a newline after print",
 			&'template': """
 			{{ 7 }}
 
@@ -394,7 +394,7 @@ func test_whitespace_handling() -> void:
 			""",
 			&'variables': {},
 			&'configure': func(se: StringEngine):
-				se.clear_newline_after_echo = true
+				se.clear_newline_after_print = true
 				,
 			&'expected': """
 			7
@@ -792,7 +792,7 @@ func test_statement_verbatim() -> void:
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
-			Use an echo statement like so: `Hello {{ name }}`
+			Use an print statement like so: `Hello {{ name }}`
 			With the key `'name'` set to `"world"` in the `variables` Dictionary.
 			{% endverbatim %}
 			""",
@@ -801,7 +801,7 @@ func test_statement_verbatim() -> void:
 			},
 			&'expected': """
 			
-			Use an echo statement like so: `Hello {{ name }}`
+			Use an print statement like so: `Hello {{ name }}`
 			With the key `'name'` set to `"world"` in the `variables` Dictionary.
 			
 			""",
@@ -809,13 +809,13 @@ func test_statement_verbatim() -> void:
 		{
 			&'rule': "Verbatim statement (preserves conflatable whitespaces)",
 			&'template': """
-			{% verbatim %}Use an echo statement like so: `Hello {{  name  }}`.{% endverbatim %}
+			{% verbatim %}Use an print statement like so: `Hello {{  name  }}`.{% endverbatim %}
 			""",
 			&'variables': {
 				&'name': "Escaper",
 			},
 			&'expected': """
-			Use an echo statement like so: `Hello {{  name  }}`.
+			Use an print statement like so: `Hello {{  name  }}`.
 			""",
 		},
 		# I don't know what to do with this one for now…
