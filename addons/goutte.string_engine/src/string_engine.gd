@@ -1745,10 +1745,11 @@ class ForStatementExtension:
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var loops_left := 1_000_000
 		var element := node.children[0] as IdentifierLiteralNode
-		var iterable := node.children[1] as ExpressionNode
+		var iterable_node := node.children[1] as ExpressionNode
+		var iterable := iterable_node.evaluate(context) as Array
 		var body := node.children[2] as SyntaxNode
 		var output := ""
-		for thing in iterable.evaluate(context):
+		for thing in iterable:
 			context.variables[element.identifier] = thing
 			output += body.serialize(context)
 			loops_left -= 1
@@ -1785,16 +1786,19 @@ class WhileStatementExtension:
 			.with_extension(self)
 			.with_child(condition)
 			.with_child(while_body)
-		)
+		) as StatementNode
 
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var loops_left := 1_000_000
 		var condition := node.children[0] as ExpressionNode
 		var body := node.children[1] as SyntaxNode
 		var output := ""
-		while condition.evaluate(context) and loops_left > 0:
+		#while condition.evaluate(context) and loops_left > 0:  # untyped (?)
+		while condition.evaluate(context):
 			output += body.serialize(context)
 			loops_left -= 1
+			if loops_left <= 0:
+				break
 		if loops_left == 0:
 			push_error("Possible infinite loop!")
 			breakpoint
@@ -2138,17 +2142,17 @@ class Parser:
 
 	func parse_concatenation(context: ParserContext) -> ExpressionNode:
 		var node := parse_addition(context)
-		while context.match_type(Token.Types.OPERATOR_CONCATENATION):
+		if context.match_type(Token.Types.OPERATOR_CONCATENATION):
 			node = (
 				ConcatenationOperatorNode.new()
 				.with_child(node)
 				.with_child(parse_concatenation(context))
-			)
+			) as ConcatenationOperatorNode
 		return node
 
 	func parse_addition(context: ParserContext) -> ExpressionNode:
 		var node := parse_multiplication(context)
-		while (
+		if (
 			context.match_type(Token.Types.OPERATOR_ADDITION) or
 			context.match_type(Token.Types.OPERATOR_SUBTRACTION)
 		):
@@ -2158,18 +2162,18 @@ class Parser:
 						AdditionOperatorNode.new()
 						.with_child(node)
 						.with_child(parse_addition(context))
-					)
+					) as AdditionOperatorNode
 				Token.Types.OPERATOR_SUBTRACTION:
 					node = (
 						SubtractionOperatorNode.new()
 						.with_child(node)
 						.with_child(parse_addition(context))
-					)
+					) as SubtractionOperatorNode
 		return node
 
 	func parse_multiplication(context: ParserContext) -> ExpressionNode:
 		var node := parse_modulo(context)
-		while (
+		if (
 			context.match_type(Token.Types.OPERATOR_MULTIPLICATION) or
 			context.match_type(Token.Types.OPERATOR_DIVISION)
 		):
@@ -2179,43 +2183,41 @@ class Parser:
 						MultiplicationOperatorNode.new()
 						.with_child(node)
 						.with_child(parse_multiplication(context))
-					)
+					) as MultiplicationOperatorNode
 				Token.Types.OPERATOR_DIVISION:
 					node = (
 						DivisionOperatorNode.new()
 						.with_child(node)
 						.with_child(parse_multiplication(context))
-					)
+					) as DivisionOperatorNode
 		return node
 
 	func parse_modulo(context: ParserContext) -> ExpressionNode:
 		var node := parse_filter(context)
-		while context.match_type(Token.Types.OPERATOR_MODULO):
+		if context.match_type(Token.Types.OPERATOR_MODULO):
 			node = (
 				ModuloOperatorNode.new()
 				.with_child(node)
 				.with_child(parse_modulo(context))
-			)
+			) as ModuloOperatorNode
 		return node
 
 	func parse_filter(context: ParserContext) -> ExpressionNode:
 		var node := parse_unary(context)
 		while context.match_type(Token.Types.FILTER):
-			var subject := node
-			var filter_identifier_node := parse_filter_identifier(context)
-			var filter_identifier := filter_identifier_node.tokens[0].lexeme
-			var filter_extension := context.get_filter_extension(filter_identifier)
+			var filter_id_node := parse_filter_identifier(context)
+			var filter_id := filter_id_node.tokens[0].lexeme
+			var filter_extension := context.get_filter_extension(filter_id)
 			assert(filter_extension)
 
-			node = FilterNode.new()
-			node.with_extension(filter_extension)
-			node.with_subject(subject)
+			var filter_node := FilterNode.new()
+			filter_node.with_subject(node)
+			filter_node.with_extension(filter_extension)
 			if context.match_type(Token.Types.EXPRESSION_GROUP_OPENER):
-				node.with_parameters(parse_expressions(context))
+				filter_node.with_parameters(parse_expressions(context))
 				context.consume_type(Token.Types.EXPRESSION_GROUP_CLOSER)
-
+			node = filter_node
 		return node
-
 
 	func parse_unary(context: ParserContext) -> ExpressionNode:
 		var node: ExpressionNode
