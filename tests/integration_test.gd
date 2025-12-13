@@ -789,6 +789,11 @@ func test_statement_while() -> void:
 func test_statement_verbatim() -> void:
 	var data := [
 		{
+			&'rule': "Empty Verbatim statement is allowed",
+			&'template': "{% verbatim %}{% endverbatim %}",
+			&'expected': "",
+		},
+		{
 			&'rule': "Verbatim statement",
 			&'template': """
 			{% verbatim %}
@@ -1043,7 +1048,7 @@ func test_handling_errors() -> void:
 func process_datum(datum: Dictionary) -> void:
 	var rule: String = datum.get(&'rule', "<unnamed rule>")
 	var template: String = datum.get(&'template')
-	var variables: Dictionary = datum.get(&'variables')
+	var variables: Dictionary = datum.get(&'variables', {})
 	var configure: Callable = datum.get(&'configure', func(_se: StringEngine): return)
 	
 	print("\t* %s" % [rule])
@@ -1062,6 +1067,7 @@ func process_datum(datum: Dictionary) -> void:
 	
 	if datum.has(&'expected_error'):
 		engine.break_on_error = false
+		engine.silence_errors = true
 		var expected_error: String = datum[&'expected_error']
 		var rendered := engine.render(template, variables)
 		assert(not rendered.errors.is_empty(), "Expected an error, but got none.\nWas expecting: %s" % expected_error)
@@ -1072,3 +1078,4 @@ func process_datum(datum: Dictionary) -> void:
 			datum[&'variables'],
 		])
 		engine.break_on_error = true
+		engine.silence_errors = false

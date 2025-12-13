@@ -12,8 +12,10 @@ var clear_newline_after_statement := false
 var clear_newline_after_comment := false
 ## Clear a single newline if it immediately follows a print.
 var clear_newline_after_print := false
-## If available, enter debug mode immediately when there's an error.
+## Enter debug mode immediately when there's an error. (if applicable)
 var break_on_error := true
+## Because we unit-test some errors; you should probably ignore this option.
+var silence_errors := false
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
@@ -270,8 +272,10 @@ class Tokenizer:
 	var clear_newline_after_print := false
 	
 	## This is always false in exported builds, as they have no breakpoints.
-	## We use this to assert stuff about our errors in the test suite.
+	## We set this to false to assert stuff about our errors in the test suite.
 	var break_on_error := true
+	## Prevent red errors to show up in the log; used by the test-suite.
+	var silence_errors := false
 	
 	var symbol_clear_whitespace := '-'  # as in {{- for example
 	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
@@ -968,7 +972,8 @@ class Tokenizer:
 		error.message = message
 		errors.append(error)
 		
-		printerr(message)
+		if not silence_errors:
+			printerr(message)
 		if break_on_error:
 			assert(false, message)
 
@@ -1624,7 +1629,7 @@ class IfElseStatementExtension:
 			.with_extension(self)
 			.with_child(condition)
 			.with_child(then_node)
-		)
+		) as StatementNode
 		if else_node:
 			if_node.with_child(else_node)
 
@@ -1657,28 +1662,29 @@ class VerbatimStatementExtension:
 			func(token_index: int):
 				return (
 					context.tokens[token_index].type == Token.Types.STATEMENT_OPENER
-					&&
+					and
 					context.tokens[token_index+1].type == Token.Types.STATEMENT_IDENTIFIER
-					&&
+					and
 					context.tokens[token_index+1].lexeme == 'end' + get_identifier()
-					&&
+					and
 					context.tokens[token_index+2].type == Token.Types.STATEMENT_CLOSER
 				)
 		)
 		context.consume_some_tokens(3)  # {% end<statement_identifier> %}
 
+		# TBD: how to type this ?
 		var content: String = content_tokens.reduce(
-			func(acc: String, tk: Token):
-				return acc + tk.whitespaces_before + tk.literal + tk.whitespaces_after
+			func(acc: String, tk: Token) -> String:
+				return (acc + tk.whitespaces_before + tk.literal + tk.whitespaces_after) as String
 				,
 			""
-		)
+		) as String
 
 		return (
 			StatementNode.new()
 			.with_extension(self)
 			.with_child(RawDataNode.new().with_data(content))
-		)
+		) as StatementNode
 
 	func evaluate(context: VisitorContext, node: StatementNode) -> String:
 		if node.children.is_empty():
@@ -1705,7 +1711,7 @@ class SetStatementExtension:
 			.with_extension(self)
 			.with_child(variable_identifier)
 			.with_child(value)
-		)
+		) as StatementNode
 	
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
@@ -1740,7 +1746,7 @@ class ForStatementExtension:
 			.with_child(element)
 			.with_child(iterable)
 			.with_child(for_body)
-		)
+		) as StatementNode
 
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var loops_left := 1_000_000
@@ -1918,14 +1924,14 @@ class ParserContext:
 			])
 			return null  # ErrorToken ?
 
-	func consume_until_type(type: Token.Types) -> Array[Token]:
-		var consumed: Array[Token] = []
-		while has_tokens_remaining():
-			var token := consume_current_token()
-			if token.type == type:
-				break
-			consumed.append(token)
-		return consumed
+	#func consume_until_type(type: Token.Types) -> Array[Token]:
+		#var consumed: Array[Token] = []
+		#while has_tokens_remaining():
+			#var token := consume_current_token()
+			#if token.type == type:
+				#break
+			#consumed.append(token)
+		#return consumed
 
 	func consume_until(condition: Callable) -> Array[Token]:
 		var consumed: Array[Token] = []
@@ -1934,7 +1940,7 @@ class ParserContext:
 		while not found:
 			cursor += 1
 			if self.current_token_index + cursor >= self.tokens.size():
-				assert(false, "Did not find the end condition.")
+				raise_error("Did not find the end condition.")
 				break
 			found = condition.call(self.current_token_index + cursor)
 		consumed.append_array(self.tokens.slice(self.current_token_index, self.current_token_index + cursor))
@@ -1973,6 +1979,7 @@ class Parser:
 	extends RefCounted
 
 	var break_on_error := true
+	var silence_errors := false
 	var errors: Array[TemplateError] = []
 
 	func parse(
@@ -2307,7 +2314,8 @@ class Parser:
 			message += "\n" + "At line %d" % [
 				token.starts_in_source_at_line
 			]
-		printerr(message)
+		if not silence_errors:
+			printerr(message)
 		var error := TemplateError.new()
 		error.message = message
 		self.errors.append(error)
@@ -2340,7 +2348,7 @@ class JanitorVisitor:
 		pass
 
 
-## Outputs the serialized template with variables replaced and logic applied.
+## Outputs the interpreted template with variables evaluated and logic applied.
 class EvaluatorVisitor:
 	extends RefCounted
 
@@ -2349,7 +2357,7 @@ class EvaluatorVisitor:
 
 
 #class CompilerVisitor:  # TODO: cache the template as pure GdScript
-#class HighlighterVisitor:  # TODO: syntax highlighting for Godot's code editor
+#class StaticAnalyser:  # TODO: static analysis for Godot's code editor
 
 #endregion
 
@@ -2365,11 +2373,13 @@ func render(source: String, variables: Dictionary) -> RenderedTemplate:
 	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
 	tokenizer.clear_newline_after_print = self.clear_newline_after_print
 	tokenizer.break_on_error = self.break_on_error
+	tokenizer.silence_errors = self.silence_errors
 	var tokens := tokenizer.tokenize(source)
 	errors.append_array(tokenizer.errors)
 
 	var parser := Parser.new()
 	parser.break_on_error = self.break_on_error
+	parser.silence_errors = self.silence_errors
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)
