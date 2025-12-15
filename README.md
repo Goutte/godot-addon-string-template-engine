@@ -36,19 +36,20 @@ Usage Example
 -------------
 
 ```gdscript
-# Instantiate the string engine
-var giwt := StringEngine.new()
+# Instantiate the string (template) engine
+var se := StringEngine.new()
 
 # Configure the string engine however you desire (like Twig, in this example)
-giwt.clear_newline_after_statement = true
-giwt.clear_newline_after_comment = true
+se.clear_newline_after_statement = true
+se.clear_newline_after_comment = true
 
 # Render a template with some variables
-var out: String = giwt.render(
-	"Hello {% if name %}{{ name | uppercase }}{% else %}World{% endif %}!",
+var rendered := se.render(
+	"Hello {% if name %}{{ name|uppercase }}{% else %}World{% endif %}!",
 	{ &'name': "Godette" },
 )
-assert(out == "Hello Godette!")
+assert(rendered.output == "Hello GODETTE!")
+assert(rendered.errors.is_empty())
 ```
 
 > This is not a very enticing template example.
@@ -83,7 +84,8 @@ Features
 	- [x] combination `and or nand xor`
 	- [x] concatenation `~`
 	- [x] arrays
-	- [ ] array index accessor  `foo[4]`
+	- [x] array index accessor  `foo[4]`
+	- [x] dictionary element accessor  `bar["baz"]`
 	- [x] objects
 	- [x] objects' properties `person.name`
 	- [ ] objects' methods `person.say("saperlipopette !")`
@@ -107,7 +109,7 @@ Features
 		- [ ] `loop.parent`  The parent context
 	- [ ] extends
 	- [ ] block
-	- [x] verbatim (SOMEWHAT BUGGY)
+	- [x] verbatim
 - [ ] filters (see [Twig Filters](https://twig.symfony.com/doc/3.x/filters/index.html))
 	- [x] abs
 	- [ ] batch
@@ -173,11 +175,13 @@ Features
 		- [x] clear a newline if right after a print (opt-in)
 - [ ] error handling
 	- [x] allow configuration of `break on error`
-	- [x] test error handling
+	- [x] test error handling a little
+	- [ ] test error handling some more
 	- [ ] test error handling exhaustively
 	- [ ] show where in the template
 		- [x] line
 		- [ ] display an excerpt
+	- [ ] Use overriden symbols in error messages
 - [ ] escaping tutorial
 - [ ] auto-escaping configuration ?
 - [ ] localization utils
@@ -187,6 +191,7 @@ Features
 		- [x] in the Open menu of the Code Editor
 	- [x] Godot opens `*.tpl` files in the Code Editor
 	- [x] syntax highlighting in the Code Editor
+	- [ ] configure the string engine using a Resource
 
 
 Install

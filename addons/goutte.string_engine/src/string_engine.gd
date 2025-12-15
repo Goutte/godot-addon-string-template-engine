@@ -168,9 +168,11 @@ class Token:
 		EXPRESSION_GROUP_CLOSER,  ## )
 		EXPRESSIONS_SEPARATOR,    ## ,
 		ACCESSOR_PROPERTY,        ## .
+		ACCESSOR_ARRAY_OPENER,    ## [
+		ACCESSOR_ARRAY_CLOSER,    ## ]
 		FILTER,                   ## |
 		FILTER_IDENTIFIER,        ## uppercase, round, abs…
-		LITERAL_IDENTIFIER,       ## ^[0-9a-zA-Z_]+$  (roughly)
+		LITERAL_IDENTIFIER,       ## ^[a-zA-Z0-9_]+$  (roughly)
 		LITERAL_BOOLEAN_TRUE,     ## true
 		LITERAL_BOOLEAN_FALSE,    ## false
 		LITERAL_INTEGER,          ## 42
@@ -316,7 +318,10 @@ class Tokenizer:
 	const symbol_comparator_greater_or_equal_than := '>='
 	const symbol_string_delimiter := '"'  # single rune, MUST NOT be backslash
 	const symbol_group_separator := ','
+	
 	const symbol_accessor_property := '.'
+	const symbol_accessor_array_opener := '['
+	const symbol_accessor_array_closer := ']'
 
 	# Privates
 	var state: States
@@ -459,7 +464,7 @@ class Tokenizer:
 		)
 		assert(has_compiled == OK, "Detection regex of #} is broken.")
 
-	## The main job of a Tokenizer is to create a stream of tokens from a source.
+	## The job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
 		reset()
 		self.source = template
@@ -596,7 +601,7 @@ class Tokenizer:
 
 	func scan_regex(closer_regex: RegEx) -> bool:
 		return null != self.source_view.rsearch_start(closer_regex)
-	
+
 	func tokenize_closer(
 		symbol: String,           ## closer symbol to look for
 		token_type: Token.Types,  ## token type to create
@@ -633,11 +638,11 @@ class Tokenizer:
 	func mark_next_newline_for_clearing() -> void:
 		if not self.tokens.is_empty():
 			self.tokens[-1].clear_newline_after = true
-	
+
 	func mark_next_whitespaces_for_clearing() -> void:
 		if not self.tokens.is_empty():
 			self.tokens[-1].clear_whitespaces_after = true
-	
+
 	func mark_next_tabspaces_for_clearing() -> void:
 		if not self.tokens.is_empty():
 			self.tokens[-1].clear_tabspaces_after = true
@@ -677,6 +682,7 @@ class Tokenizer:
 		if tokenize_literal_integer() == OK: return OK
 		if tokenize_literal_string() == OK: return OK
 		if tokenize_accessor_property() == OK: return OK
+		if tokenize_accessor_array() == OK: return OK
 		if tokenize_operator_addition() == OK: return OK
 		if tokenize_operator_subtraction() == OK: return OK
 		if tokenize_operator_multiplication() == OK: return OK
@@ -724,10 +730,6 @@ class Tokenizer:
 		return OK
 
 	func tokenize_filter() -> Error:
-		#return tokenize_symbol(
-			#self.symbol_filter,
-			#Token.Types.FILTER,
-		#)
 		if tokenize_symbol(
 			self.symbol_filter,
 			Token.Types.FILTER,
@@ -748,7 +750,7 @@ class Tokenizer:
 			consume_source(whole_match.length())
 			return OK
 		return ERR_INVALID_DATA
-	
+
 	func tokenize_infix_in() -> Error:
 		return tokenize_symbol(
 			self.symbol_infix_in,
@@ -760,6 +762,17 @@ class Tokenizer:
 			self.symbol_accessor_property,
 			Token.Types.ACCESSOR_PROPERTY,
 		)
+
+	func tokenize_accessor_array() -> Error:
+		if OK == tokenize_symbol(
+			self.symbol_accessor_array_opener,
+			Token.Types.ACCESSOR_ARRAY_OPENER,
+		): return OK
+		if OK == tokenize_symbol(
+			self.symbol_accessor_array_closer,
+			Token.Types.ACCESSOR_ARRAY_CLOSER,
+		): return OK
+		return ERR_INVALID_DATA
 
 	func tokenize_statement_assign() -> Error:
 		return tokenize_symbol(
@@ -914,6 +927,7 @@ class Tokenizer:
 	func set_state(value: States) -> void:
 		self.state = value
 
+	## WARNING: Always add a token BEFORE consuming the source.
 	func add_token(type: Token.Types, literal: String) -> void:
 		self.tokens.append(
 			Token.new()
@@ -925,7 +939,7 @@ class Tokenizer:
 			.ending_at(self.source_view.start() + literal.length())
 			.ending_at_line(self.source_view.line() + literal.count('\n'))
 		)
-	
+
 	func add_raw_data_token(literal: String) -> void:
 		if not self.tokens.is_empty():
 			var previous_token := self.tokens[-1]
@@ -1209,8 +1223,6 @@ class UnaryOperatorNode:
 	func evaluate(context: VisitorContext) -> Variant:
 		assert(self.children.size() == 1)
 		return evaluate_unary(self.children[0].evaluate(context))
-	func serialize(context: VisitorContext) -> String:
-		return serialize_self(context)
 
 
 class PositiveUnaryOperatorNode:
@@ -1362,6 +1374,29 @@ class PropertyAccessorNode:
 		var obj: Variant = self.object.evaluate(context)
 		var prop: String = self.property.identifier
 		return obj.get(prop)
+
+	func serialize(context: VisitorContext) -> String:
+		return serialize_self(context)
+
+
+class ElementAccessorNode:
+	extends ExpressionNode
+	
+	@export var subject: ExpressionNode
+	@export var key: ExpressionNode
+	func with_subject(value: ExpressionNode) -> ElementAccessorNode:
+		self.subject = value
+		self.children.push_front(value)
+		return self
+	func with_key(value: ExpressionNode) -> ElementAccessorNode:
+		self.key = value
+		self.children.push_back(value)
+		return self
+
+	func evaluate(context: VisitorContext) -> Variant:
+		var subject_value: Variant = self.subject.evaluate(context)
+		var key_value: Variant = self.key.evaluate(context)
+		return subject_value[key_value]
 
 	func serialize(context: VisitorContext) -> String:
 		return serialize_self(context)
@@ -1762,7 +1797,7 @@ class ForStatementExtension:
 			if loops_left == 0:
 				break
 		if loops_left == 0:
-			push_error("Possible infinite loop!")
+			push_error("Possible infinite loop in a for statement.")
 			breakpoint
 		return output
 
@@ -1967,7 +2002,7 @@ class ParserContext:
 					context.get_current_token(1).lexeme == identifier
 				)
 		)
-	
+
 	func raise_error(
 		message: String,
 		token: Token = null,
@@ -1990,8 +2025,7 @@ class Parser:
 		var body := BodyNode.new()
 		var tree := SyntaxTree.new().with_body(body)
 		var context := (
-			ParserContext
-			.new()
+			ParserContext.new()
 			.with_parser(self)
 			.with_tokens(tokens)
 			.with_filter_extensions(filter_extensions)
@@ -2059,9 +2093,9 @@ class Parser:
 	# MULTIPLICATION = MODULO ( ( "*" | "/" ) MULTIPLICATION )*
 	# MODULO = FILTER ( "%" FILTER )*
 	# FILTER = UNARY ( "|" FILTER_IDENTIFIER ( "(" EXPRESSIONS ")" )? )*
-	# UNARY = ( "+" | "-" | "!" ) UNARY
-	#       | ACCESS_PROPERTY
-	# ACCESS_PROPERTY = PRIMARY ( "." LITERAL_IDENTIFIER )*
+	# UNARY = ( "+" | "-" | "!" )? ACCESS_PROPERTY
+	# ACCESS_PROPERTY = ACCESS_ELEMENT ( "." LITERAL_IDENTIFIER )*
+	# ACCESS_ELEMENT = PRIMARY ( "[" EXPRESSION "]" )*
 	# PRIMARY = LITERAL
 	#         | LITERAL_IDENTIFIER
 	#         | "(" EXPRESSION ")"
@@ -2242,21 +2276,32 @@ class Parser:
 					node = NegativeUnaryOperatorNode.new()
 
 		if node:
-			node.with_child(parse_secondary(context))
+			node.with_child(parse_accessor_property(context))
 			node.with_token(context.get_previous_token())
 		else:
-			node = parse_secondary(context)
+			node = parse_accessor_property(context)
 
 		return node
 
-	func parse_secondary(context: ParserContext) -> ExpressionNode:
-		var node := parse_primary(context)
+	func parse_accessor_property(context: ParserContext) -> ExpressionNode:
+		var node := parse_accessor_element(context)
 		while context.match_type(Token.Types.ACCESSOR_PROPERTY):
 			node = (
 				PropertyAccessorNode.new()
 				.with_object(node)
 				.with_property(parse_literal_identifier(context))
 			)
+		return node
+	
+	func parse_accessor_element(context: ParserContext) -> ExpressionNode:
+		var node := parse_primary(context)
+		while context.match_type(Token.Types.ACCESSOR_ARRAY_OPENER):
+			node = (
+				ElementAccessorNode.new()
+				.with_subject(node)
+				.with_key(parse_expression(context))
+			)
+			context.consume_type(Token.Types.ACCESSOR_ARRAY_CLOSER)
 		return node
 	
 	func parse_primary(context: ParserContext) -> ExpressionNode:
