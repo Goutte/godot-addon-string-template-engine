@@ -17,7 +17,7 @@ class Person:
 
 
 func test_a_bunch_of_rules() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Empty template yields empty string",
 			&'template': "",
@@ -52,14 +52,12 @@ func test_a_bunch_of_rules() -> void:
 			use \\Addons\\StringEngine;
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
-	#print("\tRan %d subtests" % data.size())
+	])
+
 
 #region Comment with {# … #}
 func test_comments() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Comments",
 			&'template': """
@@ -74,13 +72,11 @@ func test_comments() -> void:
 			
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Print with {{ … }}
 func test_print() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Print a variable with {{ … }}",
 			&'template': "Hello {{ name }}!",
@@ -131,13 +127,11 @@ func test_print() -> void:
 			Cordially, yours truly.
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Accessors
 func test_accessors() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Access objects' properties with .",
 			&'template': "Hello {{ person.name }} {{ person.surname }}!",
@@ -146,13 +140,25 @@ func test_accessors() -> void:
 			},
 			&'expected': "Hello Jean Valjean!",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+		{
+			&'rule': "Access array elements by index with []",
+			&'template': "{{ books[0] }}, {{ books[1] }}, {{ books[2] }}",
+			&'variables': {
+				&'books': [
+					"Oryx & Crake",
+					"Excession",
+					"Hpmor",
+					"Flowers for Algernon",
+				],
+			},
+			&'expected': "Oryx & Crake, Excession, Hpmor",
+		},
+	])
+
 #endregion
 #region Literals
 func test_literals() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Integers",
 			&'template': """
@@ -241,13 +247,11 @@ func test_literals() -> void:
 			TODO
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Whitespace handling
 func test_whitespace_handling() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Padding whitespaces are optional",
 			&'template': "Hello {{name}}!",
@@ -419,13 +423,11 @@ func test_whitespace_handling() -> void:
 			#5
 			#""",
 		#},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Boolean Logic
 func test_boolean_logic() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
@@ -495,13 +497,11 @@ func test_boolean_logic() -> void:
 			false
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Concatenation
 func test_concatenation() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Concatenation using ~",
 			&'template': """
@@ -520,13 +520,11 @@ func test_concatenation() -> void:
 			1true0.0false
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region Maths
 func test_maths() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Addition of integers",
 			&'template': """
@@ -678,14 +676,12 @@ func test_maths() -> void:
 			1202
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 
 #region {% if … %} … {% else %} … {% endif %}
 func test_statement_if() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "If statement",
 			&'template': """
@@ -741,13 +737,11 @@ func test_statement_if() -> void:
 			
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region {% for … %} … {% endfor %}
 func test_statement_for() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "For statement",
 			&'template': """
@@ -760,13 +754,11 @@ func test_statement_for() -> void:
 			2 3 5 7 11 
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region {% while … %} … {% endwhile %}
 func test_statement_while() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "While statement",
 			&'template': """
@@ -781,13 +773,11 @@ func test_statement_while() -> void:
 			54321
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region {% verbatim %} … {% endverbatim %}
 func test_statement_verbatim() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Empty Verbatim statement is allowed",
 			&'template': "{% verbatim %}{% endverbatim %}",
@@ -840,13 +830,11 @@ func test_statement_verbatim() -> void:
 			# ?
 			#""",
 		#},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region {% set … = … %}
 func test_statement_set() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Set statement",
 			&'template': """
@@ -865,14 +853,12 @@ func test_statement_set() -> void:
 			Hello pouloupi!
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 
 #region | abs
 func test_filter_abs() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Filter abs",
 			&'template': """
@@ -893,13 +879,11 @@ func test_filter_abs() -> void:
 			2.0
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region | capitalize
 func test_filter_capitalize() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Filter capitalize",
 			&'template': """
@@ -922,13 +906,11 @@ func test_filter_capitalize() -> void:
 			True
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region | round
 func test_filter_round() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Filter round",
 			&'template': """
@@ -963,13 +945,11 @@ func test_filter_round() -> void:
 			-2
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 #region | uppercase
 func test_filters_upper_lower() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Filters for uppercase and lowercase",
 			&'template': """
@@ -994,14 +974,12 @@ func test_filters_upper_lower() -> void:
 			FALSE
 			""",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 
 #region Handling errors
 func test_handling_errors() -> void:
-	var data := [
+	process_test_data([
 		{
 			&'rule': "Handle error with unfinished print statement",
 			&'template': """
@@ -1039,13 +1017,15 @@ func test_handling_errors() -> void:
 			},
 			&'expected_error': "Expected an {% endif %} at some point to close the {% if … %} found at line 2, but did not find it.\nAt line 2",
 		},
-	]
-	for datum: Dictionary in data:
-		process_datum(datum)
+	])
 #endregion
 
 
-func process_datum(datum: Dictionary) -> void:
+func process_test_data(data: Array[Dictionary]) -> void:
+	for datum: Dictionary in data:
+		process_test_datum(datum)
+
+func process_test_datum(datum: Dictionary) -> void:
 	var rule: String = datum.get(&'rule', "<unnamed rule>")
 	var template: String = datum.get(&'template')
 	var variables: Dictionary = datum.get(&'variables', {})
