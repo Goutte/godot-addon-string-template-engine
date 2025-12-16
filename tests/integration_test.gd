@@ -1,5 +1,7 @@
 extends AbstractTest
 
+# INFO: Activate `Edit > Folding > Fold All Lines` to get an overview.
+
 ## A test object.
 class Person:
 	extends RefCounted
@@ -17,7 +19,7 @@ class Person:
 
 
 func test_a_bunch_of_rules() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Empty template yields empty string",
 			&'template': "",
@@ -57,7 +59,7 @@ func test_a_bunch_of_rules() -> void:
 
 #region Comment with {# … #}
 func test_comments() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Comments",
 			&'template': """
@@ -76,7 +78,7 @@ func test_comments() -> void:
 #endregion
 #region Print with {{ … }}
 func test_print() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Print a variable with {{ … }}",
 			&'template': "Hello {{ name }}!",
@@ -131,7 +133,7 @@ func test_print() -> void:
 #endregion
 #region Accessors
 func test_accessors() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Access objects' properties with .",
 			&'template': "Hello {{ person.name }} {{ person.surname }}!",
@@ -158,7 +160,7 @@ func test_accessors() -> void:
 #endregion
 #region Literals
 func test_literals() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Integers",
 			&'template': """
@@ -251,7 +253,7 @@ func test_literals() -> void:
 #endregion
 #region Whitespace handling
 func test_whitespace_handling() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Padding whitespaces are optional",
 			&'template': "Hello {{name}}!",
@@ -427,7 +429,7 @@ func test_whitespace_handling() -> void:
 #endregion
 #region Boolean Logic
 func test_boolean_logic() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
@@ -501,7 +503,7 @@ func test_boolean_logic() -> void:
 #endregion
 #region Concatenation
 func test_concatenation() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Concatenation using ~",
 			&'template': """
@@ -524,7 +526,7 @@ func test_concatenation() -> void:
 #endregion
 #region Maths
 func test_maths() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Addition of integers",
 			&'template': """
@@ -681,7 +683,7 @@ func test_maths() -> void:
 
 #region {% if … %} … {% else %} … {% endif %}
 func test_statement_if() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "If statement",
 			&'template': """
@@ -741,9 +743,9 @@ func test_statement_if() -> void:
 #endregion
 #region {% for … %} … {% endfor %}
 func test_statement_for() -> void:
-	process_test_data([
+	verify_rules([
 		{
-			&'rule': "For statement",
+			&'rule': "For statement with {% for … %} … {% endfor %}",
 			&'template': """
 			{% for i in numbers %}{{ i }} {% endfor %}
 			""",
@@ -754,11 +756,59 @@ func test_statement_for() -> void:
 			2 3 5 7 11 
 			""",
 		},
+		{
+			&'rule': "For statement considers null iterators as empty",
+			&'template': """
+			{% for i in numbers %}{{ i }}{% endfor %}
+			""",
+			&'variables': {
+				&'numbers': null,
+			},
+			&'expected': """
+			
+			""",
+		},
+		{
+			&'rule': "For statement ignores null iterators, but tries the else",
+			&'template': """
+			{% for L in letters %}{{ L }}{% else %}azerty{% endfor %}
+			""",
+			&'variables': {
+				&'letters': null,
+			},
+			&'expected': """
+			azerty
+			""",
+		},
+		{
+			&'rule': "For/else statement with {% for … %} … {% else %} … {% endfor %} will trigger the else if the iterator is empty",
+			&'template': """
+			{% for i in numbers %}{{ i }}{% else %}nothing{% endfor %}
+			""",
+			&'variables': {
+				&'numbers': [],
+			},
+			&'expected': """
+			nothing
+			""",
+		},
+		{
+			&'rule': "For/else statement with {% for … %} … {% else %} … {% endfor %} will ignore the else if the iterator is not empty",
+			&'template': """
+			{% for i in numbers %}{{ i }}{% else %}nothing{% endfor %}
+			""",
+			&'variables': {
+				&'numbers': ["uno", "dos", "tres"],
+			},
+			&'expected': """
+			unodostres
+			""",
+		},
 	])
 #endregion
 #region {% while … %} … {% endwhile %}
 func test_statement_while() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "While statement",
 			&'template': """
@@ -777,7 +827,7 @@ func test_statement_while() -> void:
 #endregion
 #region {% verbatim %} … {% endverbatim %}
 func test_statement_verbatim() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Empty Verbatim statement is allowed",
 			&'template': "{% verbatim %}{% endverbatim %}",
@@ -834,7 +884,7 @@ func test_statement_verbatim() -> void:
 #endregion
 #region {% set … = … %}
 func test_statement_set() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Set statement",
 			&'template': """
@@ -858,7 +908,7 @@ func test_statement_set() -> void:
 
 #region | abs
 func test_filter_abs() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Filter abs",
 			&'template': """
@@ -883,7 +933,7 @@ func test_filter_abs() -> void:
 #endregion
 #region | capitalize
 func test_filter_capitalize() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Filter capitalize",
 			&'template': """
@@ -910,7 +960,7 @@ func test_filter_capitalize() -> void:
 #endregion
 #region | round
 func test_filter_round() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Filter round",
 			&'template': """
@@ -949,7 +999,7 @@ func test_filter_round() -> void:
 #endregion
 #region | uppercase
 func test_filters_upper_lower() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Filters for uppercase and lowercase",
 			&'template': """
@@ -979,7 +1029,7 @@ func test_filters_upper_lower() -> void:
 
 #region Handling errors
 func test_handling_errors() -> void:
-	process_test_data([
+	verify_rules([
 		{
 			&'rule': "Handle error with unfinished print statement",
 			&'template': """
@@ -1021,19 +1071,20 @@ func test_handling_errors() -> void:
 #endregion
 
 
-func process_test_data(data: Array[Dictionary]) -> void:
+func verify_rules(data: Array[Dictionary]) -> void:
 	for datum: Dictionary in data:
-		process_test_datum(datum)
+		verify_rule(datum)
 
-func process_test_datum(datum: Dictionary) -> void:
+func verify_rule(datum: Dictionary) -> void:
 	var rule: String = datum.get(&'rule', "<unnamed rule>")
 	var template: String = datum.get(&'template')
+	var options: StringEngine.Options = datum.get(&'options', StringEngine.Options.new())
 	var variables: Dictionary = datum.get(&'variables', {})
 	var configure: Callable = datum.get(&'configure', func(_se: StringEngine): return)
 	
 	print("\t* %s" % [rule])
 	
-	var engine := StringEngine.new()
+	var engine := StringEngine.new(options)
 	configure.call(engine)
 	
 	if datum.has(&'expected'):
@@ -1053,9 +1104,7 @@ func process_test_datum(datum: Dictionary) -> void:
 		assert(not rendered.errors.is_empty(), "Expected an error, but got none.\nWas expecting: %s" % expected_error)
 		var actual_error: StringEngine.TemplateError = rendered.errors[0]
 		assert_equals(expected_error, actual_error.message, "Error in %s\nwith template:\n%s\nand variables:\n%s" % [
-			datum[&'rule'],
-			datum[&'template'],
-			datum[&'variables'],
+			rule,
+			template,
+			variables,
 		])
-		engine.options.break_on_error = true
-		engine.options.silence_errors = false

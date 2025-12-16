@@ -38,7 +38,7 @@ class Options:
 	@export var symbol_combinator_xor := 'xor'
 	@export var symbol_boolean_true := 'true'
 	@export var symbol_boolean_false := 'false'
-	@export var symbol_infix_in := 'in'
+	@export var symbol_containor_in := 'in'
 
 	# The order we tokenize expressions (if cascade) is hardcoded, right now.
 	# Therefore, the following values are read-only;
@@ -67,6 +67,7 @@ class Options:
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
 ## Your best bet is to look at and copy existing extensions.
+## TODO: move these to Options above.
 var statement_extensions: Array[StatementExtension] = [
 	ForStatementExtension.new(),
 	IfElseStatementExtension.new(),
@@ -78,6 +79,7 @@ var statement_extensions: Array[StatementExtension] = [
 ## Filter extensions used by the engine.
 ## You can append your own in here before calling render(…).
 ## Your best bet is to look at and copy existing extensions.
+## TODO: move these to Options above.
 var filter_extensions: Array[FilterExtension] = [
 	AbsFilterExtension.new(),
 	CapitalizeFilterExtension.new(),
@@ -243,8 +245,7 @@ class Token:
 		COMBINATOR_OR,            ## or
 		COMBINATOR_NAND,          ## nand
 		COMBINATOR_XOR,           ## xor
-		# TODO: rename CONTAINOR_IN ?
-		INFIX_IN,                 ## in
+		CONTAINOR_IN,             ## in
 	}
 	
 	## The type of this token ; its most important property.
@@ -696,7 +697,7 @@ class Tokenizer:
 		if tokenize_group_delimiter() == OK: return OK
 		if tokenize_expressions_separator() == OK: return OK
 		if tokenize_filter() == OK: return OK
-		if tokenize_infix_in() == OK: return OK
+		if tokenize_containor_in() == OK: return OK
 		#if tokenize_function_call() == OK: return OK
 		if tokenize_literal_identifier() == OK: return OK  # lastly
 		return ERR_DOES_NOT_EXIST
@@ -749,10 +750,10 @@ class Tokenizer:
 			return OK
 		return ERR_INVALID_DATA
 
-	func tokenize_infix_in() -> Error:
+	func tokenize_containor_in() -> Error:
 		return tokenize_symbol(
-			options.symbol_infix_in,
-			Token.Types.INFIX_IN,
+			options.symbol_containor_in,
+			Token.Types.CONTAINOR_IN,
 		)
 
 	func tokenize_accessor_property() -> Error:
@@ -1680,6 +1681,110 @@ class IfElseStatementExtension:
 		return ""
 
 
+class SetStatementExtension:
+	extends StatementExtension
+	func get_identifier() -> String:	return 'set'
+
+	func parse(
+		parser: Parser,
+		context: ParserContext,
+	) -> StatementNode:
+		var variable_identifier := parser.parse_literal_identifier(context)
+		context.consume_type(Token.Types.STATEMENT_ASSIGN)
+		var value := parser.parse_expression(context)
+		context.consume_type(Token.Types.STATEMENT_CLOSER)
+		
+		return (
+			StatementNode.new()
+			.with_extension(self)
+			.with_child(variable_identifier)
+			.with_child(value)
+		) as StatementNode
+	
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
+		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
+		var value = (node.children[1] as ExpressionNode).evaluate(context)
+		context.variables.set(identifier, value)
+		context.block_variables.set(identifier, value)
+		return ""
+
+
+class ForStatementExtension:
+	extends StatementExtension
+	func get_identifier() -> String:	return 'for'
+
+	func parse(parser: Parser, context: ParserContext) -> StatementNode:
+		var for_identifier_token := context.get_previous_token()
+		var element := parser.parse_literal_identifier(context)
+		context.consume_type(Token.Types.CONTAINOR_IN)
+		var iterable := parser.parse_expression(context)
+		context.consume_type(Token.Types.STATEMENT_CLOSER)
+		
+		var detect_else := context.detect_statement('else')
+		var detect_end := context.detect_statement('end' + get_identifier())
+		var detect_else_or_end := func(pc: ParserContext) -> bool:
+			return detect_else.call(pc) or detect_end.call(pc)
+
+		var for_body := SyntaxNode.new()
+		parser.parse_tokens_until(context, for_body, detect_else_or_end)
+		
+		var else_body := SyntaxNode.new()
+		var found_else := detect_else.call(context) as bool
+		if found_else:
+			context.consume_some_tokens(3)  # {% else %}
+			parser.parse_tokens_until(context, else_body, detect_end)
+		
+		var found_end := detect_end.call(context) as bool
+		if found_end:
+			context.consume_some_tokens(3)  # {% endfor %}
+		else:
+			parser.raise_error(
+				context,
+				"Expected a %s %s %s at some point to close the %s %s … %s found at line %d, but did not find it." % [
+					parser.options.symbol_statement_opener,
+					'end' + get_identifier(),
+					parser.options.symbol_statement_closer,
+					parser.options.symbol_statement_opener,
+					get_identifier(),
+					parser.options.symbol_statement_closer,
+					for_identifier_token.starts_in_source_at_line,
+				]
+			)
+		
+		return (
+			StatementNode.new()
+			.with_extension(self)
+			.with_child(element)
+			.with_child(iterable)
+			.with_child(for_body)
+			.with_child(else_body)
+		) as StatementNode
+
+	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
+		var output := ""
+		var loop_index0 := 0
+		var loops_left := 1_000_000  # safeguard against l∞∞ps
+		var element_node := node.children[0] as IdentifierLiteralNode
+		var iterable_node := node.children[1] as ExpressionNode
+		var for_body := node.children[2] as SyntaxNode
+		var else_body := node.children[3] as SyntaxNode
+		var iterable_value = iterable_node.evaluate(context)  # as Iterable
+		if iterable_value:
+			for thing in iterable_value:
+				context.variables[element_node.identifier] = thing
+				output += for_body.serialize(context)
+				loops_left -= 1
+				if loops_left < 0:
+					break
+				loop_index0 = loop_index0 + 1
+			if loops_left < 0:
+				push_error("A possible infinite loop (%d+ iterations) in a for statement was aborted." % [loop_index0+1])
+				breakpoint
+		if loop_index0 == 0 and else_body:
+			output += else_body.serialize(context)
+		return output
+
+
 class VerbatimStatementExtension:
 	extends StatementExtension
 
@@ -1726,80 +1831,6 @@ class VerbatimStatementExtension:
 		return node.children[0].serialize(context)
 
 
-class SetStatementExtension:
-	extends StatementExtension
-	func get_identifier() -> String:	return 'set'
-
-	func parse(
-		parser: Parser,
-		context: ParserContext,
-	) -> StatementNode:
-		var variable_identifier := parser.parse_literal_identifier(context)
-		context.consume_type(Token.Types.STATEMENT_ASSIGN)
-		var value := parser.parse_expression(context)
-		context.consume_type(Token.Types.STATEMENT_CLOSER)
-		
-		return (
-			StatementNode.new()
-			.with_extension(self)
-			.with_child(variable_identifier)
-			.with_child(value)
-		) as StatementNode
-	
-	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
-		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
-		var value = (node.children[1] as ExpressionNode).evaluate(context)
-		context.variables.set(identifier, value)
-		context.block_variables.set(identifier, value)
-		return ""
-
-
-class ForStatementExtension:
-	extends StatementExtension
-	func get_identifier() -> String:	return 'for'
-
-	func parse(parser: Parser, context: ParserContext) -> StatementNode:
-		var element := parser.parse_literal_identifier(context)
-		context.consume_type(Token.Types.INFIX_IN)
-		var iterable := parser.parse_expression(context)
-		context.consume_type(Token.Types.STATEMENT_CLOSER)
-		
-		var detect_end := context.detect_statement('end' + get_identifier())
-		var for_body := SyntaxNode.new()
-		parser.parse_tokens_until(
-			context,
-			for_body,
-			detect_end,
-		)
-		context.consume_some_tokens(3)  # {% endfor %}
-		
-		return (
-			StatementNode.new()
-			.with_extension(self)
-			.with_child(element)
-			.with_child(iterable)
-			.with_child(for_body)
-		) as StatementNode
-
-	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
-		var loops_left := 1_000_000
-		var element := node.children[0] as IdentifierLiteralNode
-		var iterable_node := node.children[1] as ExpressionNode
-		var iterable := iterable_node.evaluate(context) as Array
-		var body := node.children[2] as SyntaxNode
-		var output := ""
-		for thing in iterable:
-			context.variables[element.identifier] = thing
-			output += body.serialize(context)
-			loops_left -= 1
-			if loops_left == 0:
-				break
-		if loops_left == 0:
-			push_error("Possible infinite loop in a for statement.")
-			breakpoint
-		return output
-
-
 class WhileStatementExtension:
 	extends StatementExtension
 	func get_identifier() -> String:	return 'while'
@@ -1839,7 +1870,7 @@ class WhileStatementExtension:
 			if loops_left <= 0:
 				break
 		if loops_left == 0:
-			push_error("Possible infinite loop!")
+			push_error("Possible infinite l∞∞p!")
 			breakpoint
 		return output
 
@@ -2410,6 +2441,7 @@ class EvaluatorVisitor:
 #class StaticAnalyser:  # TODO: static analysis for Godot's code editor
 
 #endregion
+
 
 var options: Options
 
