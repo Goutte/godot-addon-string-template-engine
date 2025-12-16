@@ -92,8 +92,12 @@ func recompute_highlighting() -> void:
 	for line in text.count("\n") + 1:
 		lines_highlights.append({})
 	
-	var tokenizer := StringEngine.Tokenizer.new()
-	tokenizer.break_on_error = false
+	var options := StringEngine.Options.new()
+	options.break_on_error = false
+	options.silence_errors = true
+	
+	var tokenizer := StringEngine.Tokenizer.new(options)
+	#tokenizer.break_on_error = false
 	var tokens := tokenizer.tokenize(text)
 	
 	for token in tokens:

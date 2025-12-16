@@ -6,16 +6,63 @@ extends RefCounted
 # WHY?  Generate shaders, dynamic dialogues, maybe even HTML…
 # TOO SLOW?  try the fast Ginja addon using a gdextension to wrap Inja.
 
-## Clear a single newline if it immediately follows a statement.
-var clear_newline_after_statement := false
-## Clear a single newline if it immediately follows a comment.
-var clear_newline_after_comment := false
-## Clear a single newline if it immediately follows a print.
-var clear_newline_after_print := false
-## Enter debug mode immediately when there's an error. (if applicable)
-var break_on_error := true
-## Because we unit-test some errors; you should probably ignore this option.
-var silence_errors := false
+class Options:
+	extends Resource
+	
+	## Clear a single newline if it immediately follows a statement.
+	@export var clear_newline_after_statement := false
+	## Clear a single newline if it immediately follows a comment.
+	@export var clear_newline_after_comment := false
+	## Clear a single newline if it immediately follows a print.
+	@export var clear_newline_after_print := false
+	## Enter debug mode immediately when there's an error. (if applicable)
+	@export var break_on_error := true
+	## Because we unit-test some errors; you should probably ignore this option.
+	@export var silence_errors := false
+
+	@export var symbol_clear_whitespace := '-'  # as in {{- for example
+	@export var symbol_clear_line_whitespace := '~'  # as in {{~ for example
+	@export var symbol_print_opener := '{{'
+	@export var symbol_print_closer := '}}'
+	@export var symbol_comment_opener := '{#'
+	@export var symbol_comment_closer := '#}'
+	@export var symbol_statement_opener := '{%'
+	@export var symbol_statement_closer := '%}'
+	@export var symbol_statement_assign := '='
+	@export var symbol_filter := '|'
+	@export var symbol_expression_group_opener := '('
+	@export var symbol_expression_group_closer := ')'
+	@export var symbol_combinator_and := 'and'
+	@export var symbol_combinator_or := 'or'
+	@export var symbol_combinator_nand := 'nand'
+	@export var symbol_combinator_xor := 'xor'
+	@export var symbol_boolean_true := 'true'
+	@export var symbol_boolean_false := 'false'
+	@export var symbol_infix_in := 'in'
+
+	# The order we tokenize expressions (if cascade) is hardcoded, right now.
+	# Therefore, the following values are read-only;
+	# perhaps we could make their precedence configurable (at a cost).
+	const symbol_operator_addition := '+'
+	const symbol_operator_subtraction := '-'
+	const symbol_operator_multiplication := '*'
+	const symbol_operator_division := '/'
+	const symbol_operator_modulo := '%'
+	const symbol_operator_not := '!'
+	const symbol_operator_concatenation := '~'
+	const symbol_comparator_equal := '=='
+	const symbol_comparator_inequal := '!='
+	const symbol_comparator_less_than := '<'
+	const symbol_comparator_less_or_equal_than := '<='
+	const symbol_comparator_greater_than := '>'
+	const symbol_comparator_greater_or_equal_than := '>='
+	const symbol_string_delimiter := '"'  # single rune, MUST NOT be backslash
+	const symbol_group_separator := ','
+	
+	const symbol_accessor_property := '.'
+	const symbol_accessor_array_opener := '['
+	const symbol_accessor_array_closer := ']'
+	
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
@@ -268,66 +315,17 @@ class Tokenizer:
 		COMMENT,   ## Reading the comment inside of {# … #}
 	}
 
-	# Public configuration
-	var clear_newline_after_statement := false
-	var clear_newline_after_comment := false
-	var clear_newline_after_print := false
+	# Public
+	var options: Options
 	
-	## This is always false in exported builds, as they have no breakpoints.
-	## We set this to false to assert stuff about our errors in the test suite.
-	var break_on_error := true
-	## Prevent red errors to show up in the log; used by the test-suite.
-	var silence_errors := false
-	
-	var symbol_clear_whitespace := '-'  # as in {{- for example
-	var symbol_clear_line_whitespace := '~'  # as in {{~ for example
-	var symbol_print_opener := '{{'
-	var symbol_print_closer := '}}'
-	var symbol_comment_opener := '{#'
-	var symbol_comment_closer := '#}'
-	var symbol_statement_opener := '{%'
-	var symbol_statement_closer := '%}'
-	var symbol_statement_assign := '='
-
-	var symbol_filter := '|'
-	var symbol_expression_group_opener := '('
-	var symbol_expression_group_closer := ')'
-	var symbol_combinator_and := 'and'
-	var symbol_combinator_or := 'or'
-	var symbol_combinator_nand := 'nand'
-	var symbol_combinator_xor := 'xor'
-	var symbol_boolean_true := 'true'
-	var symbol_boolean_false := 'false'
-	var symbol_infix_in := 'in'
-
-	# The order we tokenize expressions (if cascade) is hardcoded, right now.
-	# Therefore, the following values are read-only;
-	# perhaps we could make their precedence configurable (at a cost).
-	const symbol_operator_addition := '+'
-	const symbol_operator_subtraction := '-'
-	const symbol_operator_multiplication := '*'
-	const symbol_operator_division := '/'
-	const symbol_operator_modulo := '%'
-	const symbol_operator_not := '!'
-	const symbol_operator_concatenation := '~'
-	const symbol_comparator_equal := '=='
-	const symbol_comparator_inequal := '!='
-	const symbol_comparator_less_than := '<'
-	const symbol_comparator_less_or_equal_than := '<='
-	const symbol_comparator_greater_than := '>'
-	const symbol_comparator_greater_or_equal_than := '>='
-	const symbol_string_delimiter := '"'  # single rune, MUST NOT be backslash
-	const symbol_group_separator := ','
-	
-	const symbol_accessor_property := '.'
-	const symbol_accessor_array_opener := '['
-	const symbol_accessor_array_closer := ']'
-
-	# Privates
+	# Private
 	var state: States
 	var tokens: Array[Token]  # Perhaps use a TokenStream class? (halfway there)
 	var source: String  # Immutable whole source, we work on a view of it
 	var source_view: StringView  # Our view on the source template.
+
+	func _init(some_options := Options.new()) -> void:
+		self.options = some_options
 
 	# @protected
 	func reset():
@@ -390,7 +388,7 @@ class Tokenizer:
 		assert(has_compiled == OK, "Never trust an IEEE754")
 
 		self.string_literal_regex = RegEx.new()
-		var quote := escape_for_regex(self.symbol_string_delimiter)
+		var quote := escape_for_regex(options.symbol_string_delimiter)
 		has_compiled = self.string_literal_regex.compile(
 			LINE_START_ANCHOR +
 			("%s" % quote) +
@@ -410,16 +408,16 @@ class Tokenizer:
 		self.openers_regex = RegEx.new()
 		has_compiled = self.openers_regex.compile(
 			"(?<symbol>" +
-			escape_for_regex(self.symbol_print_opener) +
+			escape_for_regex(options.symbol_print_opener) +
 			"|" +
-			escape_for_regex(self.symbol_statement_opener) +
+			escape_for_regex(options.symbol_statement_opener) +
 			"|" +
-			escape_for_regex(self.symbol_comment_opener) +
+			escape_for_regex(options.symbol_comment_opener) +
 			")" +
 			"(?<clear_whitespace>" +
-			escape_for_regex(self.symbol_clear_whitespace) +
+			escape_for_regex(options.symbol_clear_whitespace) +
 			"|" +
-			escape_for_regex(self.symbol_clear_line_whitespace) +
+			escape_for_regex(options.symbol_clear_line_whitespace) +
 			"|" +
 			")"
 		)
@@ -434,9 +432,9 @@ class Tokenizer:
 			return regex.compile(
 				(LINE_START_ANCHOR if use_start_anchor else "") +
 				"(?<clear_whitespace>" +
-				escape_for_regex(self.symbol_clear_whitespace) +
+				escape_for_regex(options.symbol_clear_whitespace) +
 				"|" +
-				escape_for_regex(self.symbol_clear_line_whitespace) +
+				escape_for_regex(options.symbol_clear_line_whitespace) +
 				"|" +
 				")" +
 				"(?<symbol>" + escape_for_regex(symbol) + ")"
@@ -445,21 +443,21 @@ class Tokenizer:
 		self.print_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.print_closer_regex,
-			self.symbol_print_closer,
+			options.symbol_print_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of }} is broken.")
 
 		self.statement_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.statement_closer_regex,
-			self.symbol_statement_closer,
+			options.symbol_statement_closer,
 		)
 		assert(has_compiled == OK, "Detection regex of %} is broken.")
 
 		self.comment_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.comment_closer_regex,
-			self.symbol_comment_closer,
+			options.symbol_comment_closer,
 			false,
 		)
 		assert(has_compiled == OK, "Detection regex of #} is broken.")
@@ -541,13 +539,13 @@ class Tokenizer:
 					)
 
 			match opener_symbol:
-				symbol_print_opener:
+				options.symbol_print_opener:
 					add_token(Token.Types.PRINT_OPENER, whole_match)
 					set_state(States.PRINT)
-				symbol_statement_opener:
+				options.symbol_statement_opener:
 					add_token(Token.Types.STATEMENT_OPENER, whole_match)
 					set_state(States.STATEMENT)
-				symbol_comment_opener:
+				options.symbol_comment_opener:
 					add_token(Token.Types.COMMENT_OPENER, whole_match)
 					set_state(States.COMMENT)
 				_:
@@ -560,7 +558,7 @@ class Tokenizer:
 		var closer_match := source_view.rsearch_start(comment_closer_regex)
 		if null == closer_match:
 			raise_error("Expected a %s symbol to close the comment, but found none." % [
-				self.symbol_comment_closer,
+				options.symbol_comment_closer,
 			])
 		else:
 			var match_start := closer_match.get_start()
@@ -571,31 +569,31 @@ class Tokenizer:
 
 	func tokenize_print_closer() -> Error:
 		var status := tokenize_closer(
-			self.symbol_print_closer,
+			options.symbol_print_closer,
 			Token.Types.PRINT_CLOSER,
 			self.print_closer_regex,
 		)
-		if status == OK and self.clear_newline_after_print:
+		if status == OK and options.clear_newline_after_print:
 			mark_next_newline_for_clearing()
 		return status
 
 	func tokenize_statement_closer() -> Error:
 		var status := tokenize_closer(
-			self.symbol_statement_closer,
+			options.symbol_statement_closer,
 			Token.Types.STATEMENT_CLOSER,
 			self.statement_closer_regex,
 		)
-		if status == OK and self.clear_newline_after_statement:
+		if status == OK and options.clear_newline_after_statement:
 			mark_next_newline_for_clearing()
 		return status
 
 	func tokenize_comment_closer() -> Error:
 		var status := tokenize_closer(
-			self.symbol_comment_closer,
+			options.symbol_comment_closer,
 			Token.Types.COMMENT_CLOSER,
 			self.comment_closer_regex,
 		)
-		if status == OK and self.clear_newline_after_comment:
+		if status == OK and options.clear_newline_after_comment:
 			mark_next_newline_for_clearing()
 		return status
 
@@ -628,9 +626,9 @@ class Tokenizer:
 			# TBD Is this faster or slower than match ?
 			if clear_whitespace_symbol.is_empty():
 				pass  # nothing is cool
-			elif clear_whitespace_symbol == self.symbol_clear_line_whitespace:
+			elif clear_whitespace_symbol == options.symbol_clear_line_whitespace:
 				mark_next_tabspaces_for_clearing()
-			elif clear_whitespace_symbol == self.symbol_clear_whitespace:
+			elif clear_whitespace_symbol == options.symbol_clear_whitespace:
 				mark_next_whitespaces_for_clearing()
 			
 			return OK
@@ -708,7 +706,7 @@ class Tokenizer:
 
 	func tokenize_expressions_separator() -> Error:
 		return tokenize_symbol(
-			self.symbol_group_separator,
+			options.symbol_group_separator,
 			Token.Types.EXPRESSIONS_SEPARATOR,
 		)
 
@@ -731,14 +729,14 @@ class Tokenizer:
 
 	func tokenize_filter() -> Error:
 		if tokenize_symbol(
-			self.symbol_filter,
+			options.symbol_filter,
 			Token.Types.FILTER,
 		) == OK:
 			consume_whitespaces_into_previous_token()
 			if tokenize_filter_identifier() == OK:
 				return OK
 			else:
-				raise_error("Expected a filter identifier after %s" % self.symbol_filter)
+				raise_error("Expected a filter identifier after %s" % options.symbol_filter)
 				return OK
 		return ERR_INVALID_DATA
 
@@ -753,143 +751,143 @@ class Tokenizer:
 
 	func tokenize_infix_in() -> Error:
 		return tokenize_symbol(
-			self.symbol_infix_in,
+			options.symbol_infix_in,
 			Token.Types.INFIX_IN,
 		)
 
 	func tokenize_accessor_property() -> Error:
 		return tokenize_symbol(
-			self.symbol_accessor_property,
+			options.symbol_accessor_property,
 			Token.Types.ACCESSOR_PROPERTY,
 		)
 
 	func tokenize_accessor_array() -> Error:
 		if OK == tokenize_symbol(
-			self.symbol_accessor_array_opener,
+			options.symbol_accessor_array_opener,
 			Token.Types.ACCESSOR_ARRAY_OPENER,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_accessor_array_closer,
+			options.symbol_accessor_array_closer,
 			Token.Types.ACCESSOR_ARRAY_CLOSER,
 		): return OK
 		return ERR_INVALID_DATA
 
 	func tokenize_statement_assign() -> Error:
 		return tokenize_symbol(
-			self.symbol_statement_assign,
+			options.symbol_statement_assign,
 			Token.Types.STATEMENT_ASSIGN,
 		)
 
 	func tokenize_group_delimiter() -> Error:
 		if OK == tokenize_symbol(
-			self.symbol_expression_group_opener,
+			options.symbol_expression_group_opener,
 			Token.Types.EXPRESSION_GROUP_OPENER,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_expression_group_closer,
+			options.symbol_expression_group_closer,
 			Token.Types.EXPRESSION_GROUP_CLOSER,
 		): return OK
 		return ERR_INVALID_DATA
 
 	func tokenize_operator_addition() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_addition,
+			options.symbol_operator_addition,
 			Token.Types.OPERATOR_ADDITION,
 		)
 
 	func tokenize_operator_subtraction() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_subtraction,
+			options.symbol_operator_subtraction,
 			Token.Types.OPERATOR_SUBTRACTION,
 		)
 
 	func tokenize_operator_multiplication() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_multiplication,
+			options.symbol_operator_multiplication,
 			Token.Types.OPERATOR_MULTIPLICATION,
 		)
 
 	func tokenize_operator_division() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_division,
+			options.symbol_operator_division,
 			Token.Types.OPERATOR_DIVISION,
 		)
 
 	func tokenize_operator_modulo() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_modulo,
+			options.symbol_operator_modulo,
 			Token.Types.OPERATOR_MODULO,
 		)
 
 	func tokenize_operator_concatenation() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_concatenation,
+			options.symbol_operator_concatenation,
 			Token.Types.OPERATOR_CONCATENATION,
 		)
 
 	func tokenize_comparator_equality() -> Error:
 		return tokenize_symbol(
-			self.symbol_comparator_equal,
+			options.symbol_comparator_equal,
 			Token.Types.COMPARATOR_EQUAL,
 		)
 
 	func tokenize_comparator_inequality() -> Error:
 		return tokenize_symbol(
-			self.symbol_comparator_inequal,
+			options.symbol_comparator_inequal,
 			Token.Types.COMPARATOR_INEQUAL,
 		)
 
 	func tokenize_comparator_comparison() -> Error:
 		if OK == tokenize_symbol(
-			self.symbol_comparator_less_or_equal_than,
+			options.symbol_comparator_less_or_equal_than,
 			Token.Types.COMPARATOR_LESS_EQUAL,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_comparator_less_than,
+			options.symbol_comparator_less_than,
 			Token.Types.COMPARATOR_LESS,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_comparator_greater_or_equal_than,
+			options.symbol_comparator_greater_or_equal_than,
 			Token.Types.COMPARATOR_GREATER_EQUAL,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_comparator_greater_than,
+			options.symbol_comparator_greater_than,
 			Token.Types.COMPARATOR_GREATER,
 		): return OK
 		return ERR_INVALID_DATA
 
 	func tokenize_combinator() -> Error:
 		if tokenize_symbol(
-			self.symbol_combinator_and,
+			options.symbol_combinator_and,
 			Token.Types.COMBINATOR_AND,
 		) == OK: return OK
 		if tokenize_symbol(
-			self.symbol_combinator_or,
+			options.symbol_combinator_or,
 			Token.Types.COMBINATOR_OR,
 		) == OK: return OK
 		if tokenize_symbol(
-			self.symbol_combinator_nand,
+			options.symbol_combinator_nand,
 			Token.Types.COMBINATOR_NAND,
 		) == OK: return OK
 		if tokenize_symbol(
-			self.symbol_combinator_xor,
+			options.symbol_combinator_xor,
 			Token.Types.COMBINATOR_XOR,
 		) == OK: return OK
 		return ERR_INVALID_DATA
 
 	func tokenize_operator_not() -> Error:
 		return tokenize_symbol(
-			self.symbol_operator_not,
+			options.symbol_operator_not,
 			Token.Types.OPERATOR_NOT,
 		)
 
 	func tokenize_literal_boolean() -> Error:
 		if OK == tokenize_symbol(
-			self.symbol_boolean_true,
+			options.symbol_boolean_true,
 			Token.Types.LITERAL_BOOLEAN_TRUE,
 		): return OK
 		if OK == tokenize_symbol(
-			self.symbol_boolean_false,
+			options.symbol_boolean_false,
 			Token.Types.LITERAL_BOOLEAN_FALSE,
 		): return OK
 		return ERR_INVALID_DATA
@@ -986,9 +984,9 @@ class Tokenizer:
 		error.message = message
 		errors.append(error)
 		
-		if not silence_errors:
+		if not options.silence_errors:
 			printerr(message)
-		if break_on_error:
+		if options.break_on_error:
 			assert(false, message)
 
 	# No RegEx.escape() support yet, see https://github.com/godotengine/godot-proposals/issues/7995
@@ -2013,9 +2011,11 @@ class ParserContext:
 class Parser:
 	extends RefCounted
 
-	var break_on_error := true
-	var silence_errors := false
+	var options: Options
 	var errors: Array[TemplateError] = []
+
+	func _init(some_options := Options.new()) -> void:
+		self.options = some_options
 
 	func parse(
 		tokens: Array[Token],
@@ -2059,9 +2059,14 @@ class Parser:
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.PRINT_CLOSER):
 					if context.has_tokens_remaining():
-						raise_error(context, "Expected }}, but got something else: %s" % context.get_current_token())
+						raise_error(context, "Expected a print closer `%s`, but got something else: `%s`" % [
+							options.symbol_print_closer,
+							context.get_current_token(),
+						])
 					else:
-						raise_error(context, "Expected }}, but found the end of the document.")
+						raise_error(context, "Expected a print closer `%s`, but found the end of the document." % [
+							options.symbol_print_closer,
+						])
 
 				var print_tokens: Array[Token] = []  # FIXME
 				#print_tokens.append(token)
@@ -2359,12 +2364,12 @@ class Parser:
 			message += "\n" + "At line %d" % [
 				token.starts_in_source_at_line
 			]
-		if not silence_errors:
+		if not options.silence_errors:
 			printerr(message)
 		var error := TemplateError.new()
 		error.message = message
 		self.errors.append(error)
-		if break_on_error:
+		if options.break_on_error:
 			assert(false, message)
 
 #endregion
@@ -2406,25 +2411,28 @@ class EvaluatorVisitor:
 
 #endregion
 
+var options: Options
 
+func _init(some_options := Options.new()) -> void:
+	self.options = some_options
 
 ## Renders a source template using the variables.
 ## This is the main method of the string template engine.
 func render(source: String, variables: Dictionary) -> RenderedTemplate:
 	var errors: Array[TemplateError] = []
 	
-	var tokenizer := Tokenizer.new()
-	tokenizer.clear_newline_after_statement = self.clear_newline_after_statement
-	tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
-	tokenizer.clear_newline_after_print = self.clear_newline_after_print
-	tokenizer.break_on_error = self.break_on_error
-	tokenizer.silence_errors = self.silence_errors
+	var tokenizer := Tokenizer.new(options)
+	#tokenizer.clear_newline_after_statement = options.clear_newline_after_statement
+	#tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
+	#tokenizer.clear_newline_after_print = self.clear_newline_after_print
+	#tokenizer.break_on_error = self.break_on_error
+	#tokenizer.silence_errors = self.silence_errors
 	var tokens := tokenizer.tokenize(source)
 	errors.append_array(tokenizer.errors)
 
-	var parser := Parser.new()
-	parser.break_on_error = self.break_on_error
-	parser.silence_errors = self.silence_errors
+	var parser := Parser.new(options)
+	#parser.break_on_error = self.break_on_error
+	#parser.silence_errors = self.silence_errors
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)

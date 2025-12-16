@@ -355,8 +355,8 @@ func test_whitespace_handling() -> void:
 				&'numbers': [2, 3, 5],
 			},
 			&'configure': func(se: StringEngine):
-				se.clear_newline_after_comment = true
-				se.clear_newline_after_statement = true,
+				se.options.clear_newline_after_comment = true
+				se.options.clear_newline_after_statement = true,
 			&'expected': """
 			Primes:
 			
@@ -379,8 +379,8 @@ func test_whitespace_handling() -> void:
 			""",
 			&'variables': {},
 			&'configure': func(se: StringEngine):
-				se.clear_newline_after_comment = true
-				se.clear_newline_after_statement = true,
+				se.options.clear_newline_after_comment = true
+				se.options.clear_newline_after_statement = true,
 			&'expected': """
 			Lots:
 			999
@@ -398,7 +398,7 @@ func test_whitespace_handling() -> void:
 			""",
 			&'variables': {},
 			&'configure': func(se: StringEngine):
-				se.clear_newline_after_print = true
+				se.options.clear_newline_after_print = true
 				,
 			&'expected': """
 			7
@@ -1046,8 +1046,8 @@ func process_test_datum(datum: Dictionary) -> void:
 		])
 	
 	if datum.has(&'expected_error'):
-		engine.break_on_error = false
-		engine.silence_errors = true
+		engine.options.break_on_error = false
+		engine.options.silence_errors = true
 		var expected_error: String = datum[&'expected_error']
 		var rendered := engine.render(template, variables)
 		assert(not rendered.errors.is_empty(), "Expected an error, but got none.\nWas expecting: %s" % expected_error)
@@ -1057,5 +1057,5 @@ func process_test_datum(datum: Dictionary) -> void:
 			datum[&'template'],
 			datum[&'variables'],
 		])
-		engine.break_on_error = true
-		engine.silence_errors = false
+		engine.options.break_on_error = true
+		engine.options.silence_errors = false
