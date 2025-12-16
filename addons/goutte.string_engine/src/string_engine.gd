@@ -20,6 +20,15 @@ class Options:
 	## Because we unit-test some errors; you should probably ignore this option.
 	@export var silence_errors := false
 
+	## Only these runes are allowed in literal identifiers, as well as statement
+	## and filter identifiers.  The dash (-) is a shorthand syntax. (see RegEx)
+	## This is meant to be part of a Regular Expression, in a char class [].
+	## Make sure to escape accordingly; also, you can't put anything in here.
+	## If you put symbols in here that have another meaning in our grammar,
+	## the engine will likely break and there's no way around it I guess.
+	# FIXME: use this
+	@export var allowed_runes_in_identifiers := 'a-zA-Z0-9_'
+	
 	@export var symbol_clear_whitespace := '-'  # as in {{- for example
 	@export var symbol_clear_line_whitespace := '~'  # as in {{~ for example
 	@export var symbol_print_opener := '{{'
@@ -32,13 +41,14 @@ class Options:
 	@export var symbol_filter := '|'
 	@export var symbol_expression_group_opener := '('
 	@export var symbol_expression_group_closer := ')'
-	@export var symbol_combinator_and := 'and'
-	@export var symbol_combinator_or := 'or'
-	@export var symbol_combinator_nand := 'nand'
-	@export var symbol_combinator_xor := 'xor'
 	@export var symbol_boolean_true := 'true'
 	@export var symbol_boolean_false := 'false'
+	@export var symbol_combinator_and := 'and'
+	@export var symbol_combinator_nand := 'nand'
+	@export var symbol_combinator_or := 'or'
+	@export var symbol_combinator_xor := 'xor'
 	@export var symbol_containor_in := 'in'
+	@export var symbol_operator_not := 'not'
 
 	# The order we tokenize expressions (if cascade) is hardcoded, right now.
 	# Therefore, the following values are read-only;
@@ -48,7 +58,6 @@ class Options:
 	const symbol_operator_multiplication := '*'
 	const symbol_operator_division := '/'
 	const symbol_operator_modulo := '%'
-	const symbol_operator_not := 'not'
 	const symbol_operator_concatenation := '~'
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='
@@ -62,7 +71,7 @@ class Options:
 	const symbol_accessor_property := '.'
 	const symbol_accessor_array_opener := '['
 	const symbol_accessor_array_closer := ']'
-	
+
 
 ## Statement extensions used by the engine.
 ## You can append your own in here before calling render(…).
@@ -728,6 +737,27 @@ class Tokenizer:
 		consume_source(symbol.length())
 		return OK
 
+	func tokenize_alphanumerical_symbol(symbol: String, token_type: Token.Types) -> Error:
+		# TODO: only compile this once
+		var allowed_character_regex := RegEx.create_from_string(
+			"[%s]" % options.allowed_runes_in_identifiers,
+		)
+		
+		if not self.source_view.begins_with(symbol):
+			return ERR_INVALID_DATA
+		
+		var has_more_after := self.source_view.length() > symbol.length()
+		var after := self.source_view.read_character_at(symbol.length())
+		if has_more_after:
+			var found_allowed := allowed_character_regex.search(after)
+			if found_allowed != null:
+				prints("Found!", after, found_allowed.strings)
+				return ERR_LINK_FAILED
+		
+		add_token(token_type, symbol)
+		consume_source(symbol.length())
+		return OK
+
 	func tokenize_filter() -> Error:
 		if tokenize_symbol(
 			options.symbol_filter,
@@ -858,36 +888,36 @@ class Tokenizer:
 		return ERR_INVALID_DATA
 
 	func tokenize_combinator() -> Error:
-		if tokenize_symbol(
+		if tokenize_alphanumerical_symbol(
 			options.symbol_combinator_and,
 			Token.Types.COMBINATOR_AND,
 		) == OK: return OK
-		if tokenize_symbol(
+		if tokenize_alphanumerical_symbol(
 			options.symbol_combinator_or,
 			Token.Types.COMBINATOR_OR,
 		) == OK: return OK
-		if tokenize_symbol(
+		if tokenize_alphanumerical_symbol(
 			options.symbol_combinator_nand,
 			Token.Types.COMBINATOR_NAND,
 		) == OK: return OK
-		if tokenize_symbol(
+		if tokenize_alphanumerical_symbol(
 			options.symbol_combinator_xor,
 			Token.Types.COMBINATOR_XOR,
 		) == OK: return OK
 		return ERR_INVALID_DATA
 
 	func tokenize_operator_not() -> Error:
-		return tokenize_symbol(
+		return tokenize_alphanumerical_symbol(
 			options.symbol_operator_not,
 			Token.Types.OPERATOR_NOT,
 		)
 
 	func tokenize_literal_boolean() -> Error:
-		if OK == tokenize_symbol(
+		if OK == tokenize_alphanumerical_symbol(
 			options.symbol_boolean_true,
 			Token.Types.LITERAL_BOOLEAN_TRUE,
 		): return OK
-		if OK == tokenize_symbol(
+		if OK == tokenize_alphanumerical_symbol(
 			options.symbol_boolean_false,
 			Token.Types.LITERAL_BOOLEAN_FALSE,
 		): return OK
@@ -2082,6 +2112,7 @@ class Parser:
 			into_parent.children.append(node)
 
 	func parse_token(context: ParserContext) -> SyntaxNode:
+		var token_index = context.current_token_index
 		var token: Token = context.consume_current_token()
 		match token.type:
 			Token.Types.RAW_DATA:
@@ -2089,14 +2120,19 @@ class Parser:
 			Token.Types.PRINT_OPENER:
 				var expression: ExpressionNode = parse_expression(context)
 				if not context.match_type(Token.Types.PRINT_CLOSER):
+					var wrong_source := ""
+					for i in range(token_index, context.current_token_index):
+						wrong_source += str(context.tokens[i].literal)
 					if context.has_tokens_remaining():
-						raise_error(context, "Expected a print closer `%s`, but got something else: `%s`" % [
+						raise_error(context, "Expected a print closer `%s` after `%s`, but found `%s`" % [
 							options.symbol_print_closer,
+							wrong_source,
 							context.get_current_token(),
 						])
 					else:
-						raise_error(context, "Expected a print closer `%s`, but found the end of the document." % [
+						raise_error(context, "Expected a print closer `%s` after `%s`, but found the end of the document." % [
 							options.symbol_print_closer,
+							wrong_source,
 						])
 
 				var print_tokens: Array[Token] = []  # FIXME

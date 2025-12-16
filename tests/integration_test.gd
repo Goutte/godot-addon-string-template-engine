@@ -162,6 +162,26 @@ func test_accessors() -> void:
 func test_literals() -> void:
 	verify_rules([
 		{
+			&'rule': "Booleans",
+			&'template': """
+			{{ true }}
+			{{true}}
+			{{ false }}
+			{{false}}
+			{{ falsey }}
+			""",
+			&'variables': {
+				&'falsey': 'faux',
+			},
+			&'expected': """
+			true
+			true
+			false
+			false
+			faux
+			""",
+		},
+		{
 			&'rule': "Integers",
 			&'template': """
 			0{{ 11 }}0
@@ -442,6 +462,22 @@ func test_boolean_logic() -> void:
 			true
 			false
 			false
+			""",
+		},
+		{
+			&'rule': "Not operator",
+			&'template': """
+			{{ not harry }}
+			{{ notary }}
+			""",
+			&'variables': {
+				&'harry': false,
+				&'notary': "clerc",
+				&'ary': true,
+			},
+			&'expected': """
+			true
+			clerc
 			""",
 		},
 		{
