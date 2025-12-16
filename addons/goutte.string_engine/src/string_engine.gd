@@ -48,7 +48,7 @@ class Options:
 	const symbol_operator_multiplication := '*'
 	const symbol_operator_division := '/'
 	const symbol_operator_modulo := '%'
-	const symbol_operator_not := '!'
+	const symbol_operator_not := 'not'
 	const symbol_operator_concatenation := '~'
 	const symbol_comparator_equal := '=='
 	const symbol_comparator_inequal := '!='

@@ -162,7 +162,7 @@ func recompute_highlighting() -> void:
 				color = keyword_color
 			StringEngine.Token.Types.COMBINATOR_XOR:
 				color = keyword_color
-			StringEngine.Token.Types.INFIX_IN:
+			StringEngine.Token.Types.CONTAINOR_IN:
 				color = keyword_color
 			StringEngine.Token.Types.EXPRESSION_GROUP_OPENER:
 				color = symbol_color

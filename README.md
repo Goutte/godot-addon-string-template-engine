@@ -98,7 +98,7 @@ Features
 	- [x] while `{% while … %} … {% endwhile %}`
 	- [ ] for
 		- [x] `{% for … in … %} … {% endfor %}`
-		- [ ] `{% for … in … %} … {% else %} … {% endfor %}`
+		- [x] `{% for … in … %} … {% else %} … {% endfor %}`
 		- [ ] `loop.index`  The current iteration of the loop. (1 indexed)
 		- [ ] `loop.index0`  The current iteration of the loop. (0 indexed)
 		- [ ] `loop.revindex`  The number of iterations from the end of the loop (1 indexed)
@@ -191,7 +191,7 @@ Features
 		- [x] in the Open menu of the Code Editor
 	- [x] Godot opens `*.tpl` files in the Code Editor
 	- [x] syntax highlighting in the Code Editor
-	- [ ] configure the string engine using a Resource
+	- [x] configure the string engine using a Resource
 
 
 Install

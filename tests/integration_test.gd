@@ -433,9 +433,9 @@ func test_boolean_logic() -> void:
 		{
 			&'rule': "Not operator works like Godot's",
 			&'template': """
-			{{ !0 }}
-			{{ !1 }}
-			{{ ! 41 }}
+			{{ not 0 }}
+			{{ not 1 }}
+			{{ not 41 }}
 			""",
 			&'variables': {},
 			&'expected': """
