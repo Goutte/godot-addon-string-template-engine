@@ -26,7 +26,6 @@ class Options:
 	## Make sure to escape accordingly; also, you can't put anything in here.
 	## If you put symbols in here that have another meaning in our grammar,
 	## the engine will likely break and there's no way around it I guess.
-	# FIXME: use this
 	@export var allowed_runes_in_identifiers := 'a-zA-Z0-9_'
 	
 	@export var symbol_clear_whitespace := '-'  # as in {{- for example
@@ -401,10 +400,9 @@ class Tokenizer:
 		var quote := escape_for_regex(options.symbol_string_delimiter)
 		has_compiled = self.string_literal_regex.compile(
 			LINE_START_ANCHOR +
-			("%s" % quote) +
+			quote +
 			("(?:[^\\\\%s]|\\\\[\\s\\S])*" % quote) +
-			#("(?:[^\\\\%s]|\\\\.)*" % quote) +
-			("%s" % quote)
+			quote
 		)
 		assert(has_compiled == OK, "Never trust an IEEE754")
 
@@ -455,14 +453,14 @@ class Tokenizer:
 			self.print_closer_regex,
 			options.symbol_print_closer,
 		)
-		assert(has_compiled == OK, "Detection regex of }} is broken.")
+		assert(has_compiled == OK, "Regex of print closer is broken.")
 
 		self.statement_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
 			self.statement_closer_regex,
 			options.symbol_statement_closer,
 		)
-		assert(has_compiled == OK, "Detection regex of %} is broken.")
+		assert(has_compiled == OK, "Regex of statement closer is broken.")
 
 		self.comment_closer_regex = RegEx.new()
 		has_compiled = compile_closer_regex.call(
@@ -470,7 +468,7 @@ class Tokenizer:
 			options.symbol_comment_closer,
 			false,
 		)
-		assert(has_compiled == OK, "Detection regex of #} is broken.")
+		assert(has_compiled == OK, "Regex of comment closer is broken.")
 
 	## The job of a Tokenizer is to create a stream of tokens from a source.
 	func tokenize(template: String) -> Array[Token]:
@@ -2473,12 +2471,12 @@ class EvaluatorVisitor:
 		return tree.serialize(context)
 
 
-#class CompilerVisitor:  # TODO: cache the template as pure GdScript
-#class StaticAnalyser:  # TODO: static analysis for Godot's code editor
+#class CompilerVisitor:  # cache the template as pure GdScript?
+#class StaticAnalyser:  # static analysis for Godot's code editor?
 
 #endregion
 
-
+## Options of the String Engine, also used by the Tokenizer and Parser.
 var options: Options
 
 func _init(some_options := Options.new()) -> void:
@@ -2490,17 +2488,10 @@ func render(source: String, variables: Dictionary) -> RenderedTemplate:
 	var errors: Array[TemplateError] = []
 	
 	var tokenizer := Tokenizer.new(options)
-	#tokenizer.clear_newline_after_statement = options.clear_newline_after_statement
-	#tokenizer.clear_newline_after_comment = self.clear_newline_after_comment
-	#tokenizer.clear_newline_after_print = self.clear_newline_after_print
-	#tokenizer.break_on_error = self.break_on_error
-	#tokenizer.silence_errors = self.silence_errors
 	var tokens := tokenizer.tokenize(source)
 	errors.append_array(tokenizer.errors)
 
 	var parser := Parser.new(options)
-	#parser.break_on_error = self.break_on_error
-	#parser.silence_errors = self.silence_errors
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)

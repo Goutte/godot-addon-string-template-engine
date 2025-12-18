@@ -1,7 +1,7 @@
 ![Icon](icon.svg)
 
 String Template Engine Addon for Godot
---------------------------------------
+======================================
 
 [![MIT](https://img.shields.io/github/license/Goutte/godot-addon-string-template-engine.svg)](https://github.com/Goutte/godot-addon-string-template-engine)
 [![Release](https://img.shields.io/github/release/Goutte/godot-addon-string-template-engine.svg)](https://github.com/Goutte/godot-addon-string-template-engine/releases)
@@ -17,19 +17,10 @@ Within the bounds of Godot and its goals, as it remains a Godot addon.
 
 It is useful to generate:
 
-- shader code
+- tailored shader code
 - dynamic roleplay
 - html and stuff
-- _tell us how **you** use it in the comments_
-
-
-Disclaimer
-----------
-
-The feature set of this addon is slim, as the addon is young,
-and none-one so far has plans to push it towards its end goal.
-
-We add what we need, when we can.  **Contributions are welcome.**
+- _…_
 
 
 Usage Example
@@ -40,8 +31,8 @@ Usage Example
 var se := StringEngine.new()
 
 # Configure the string engine however you desire (like Twig, in this example)
-se.clear_newline_after_statement = true
-se.clear_newline_after_comment = true
+se.options.clear_newline_after_statement = true
+se.options.clear_newline_after_comment = true
 
 # Render a template with some variables
 var rendered := se.render(
@@ -181,7 +172,7 @@ Features
 	- [ ] show where in the template
 		- [x] line
 		- [ ] display an excerpt
-	- [ ] Use overriden symbols in error messages
+	- [x] Use overriden symbols in error messages
 - [ ] escaping tutorial
 - [ ] auto-escaping configuration ?
 - [ ] localization utils
@@ -209,6 +200,16 @@ Documentation
 
 Please see the [addons' README](./addons/goutte.string_engine/README.md).
 
+
+Known Issues
+------------
+
+This addon has not been hardened by battle; expect some issues.
+
+Overriding the grammar symbols may cause issues as the order in which they are
+tokenized is hardcoded and not (yet) computed (and cached) from your options.
+
+Dual syntax highlighting (eg: gdshader & template) is not yet supported.
 
 -----
 
