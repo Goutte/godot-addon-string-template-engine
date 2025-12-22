@@ -74,13 +74,13 @@ Features
 	- [x] comparison `== != < <= > >=`
 	- [x] combination `and or nand xor`
 	- [x] concatenation `~`
+	- [x] filters `|`
 	- [x] arrays
 	- [x] array index accessor  `foo[4]`
 	- [x] dictionary element accessor  `bar["baz"]`
 	- [x] objects
 	- [x] objects' properties `person.name`
 	- [ ] objects' methods `person.say("saperlipopette !")`
-	- [x] filters `|`
 	- [ ] constants like `TAU`
 - [ ] statements
 	- [x] print `{{ … }}`
@@ -90,14 +90,15 @@ Features
 	- [ ] for
 		- [x] `{% for … in … %} … {% endfor %}`
 		- [x] `{% for … in … %} … {% else %} … {% endfor %}`
-		- [ ] `loop.index`  The current iteration of the loop. (1 indexed)
-		- [ ] `loop.index0`  The current iteration of the loop. (0 indexed)
+		- [x] `loop.index`  The current iteration of the loop. (1 indexed)
+		- [x] `loop.index0`  The current iteration of the loop. (0 indexed)
 		- [ ] `loop.revindex`  The number of iterations from the end of the loop (1 indexed)
 		- [ ] `loop.revindex0`  The number of iterations from the end of the loop (0 indexed)
 		- [ ] `loop.first`  True if first iteration
 		- [ ] `loop.last`  True if last iteration
 		- [ ] `loop.length`  The number of items in the sequence
 		- [ ] `loop.parent`  The parent context
+	- [ ] include
 	- [ ] extends
 	- [ ] block
 	- [x] verbatim

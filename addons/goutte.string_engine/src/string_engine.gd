@@ -712,12 +712,6 @@ class Tokenizer:
 	#func tokenize_function_call() -> Error:
 		#return ERR_INVALID_DATA
 
-	func tokenize_expressions_separator() -> Error:
-		return tokenize_symbol(
-			options.symbol_group_separator,
-			Token.Types.EXPRESSIONS_SEPARATOR,
-		)
-
 	func tokenize_literal_identifier() -> Error:
 		var regex_match := self.source_view.rsearch_start(identifier_literal_regex)
 		if regex_match == null:
@@ -749,12 +743,17 @@ class Tokenizer:
 		if has_more_after:
 			var found_allowed := allowed_character_regex.search(after)
 			if found_allowed != null:
-				prints("Found!", after, found_allowed.strings)
 				return ERR_LINK_FAILED
 		
 		add_token(token_type, symbol)
 		consume_source(symbol.length())
 		return OK
+
+	func tokenize_expressions_separator() -> Error:
+		return tokenize_symbol(
+			options.symbol_group_separator,
+			Token.Types.EXPRESSIONS_SEPARATOR,
+		)
 
 	func tokenize_filter() -> Error:
 		if tokenize_symbol(
@@ -779,7 +778,7 @@ class Tokenizer:
 		return ERR_INVALID_DATA
 
 	func tokenize_containor_in() -> Error:
-		return tokenize_symbol(
+		return tokenize_alphanumerical_symbol(
 			options.symbol_containor_in,
 			Token.Types.CONTAINOR_IN,
 		)
@@ -1081,11 +1080,6 @@ class SyntaxNode:
 		return str(evaluate(context))
 
 	func serialize_children(context: VisitorContext) -> String:
-		#return self.children.reduce(
-			#func(accu: String, child: SyntaxNode): return accu + child.serialize(context),
-			#"",
-		#)
-		# ↑↓ which is faster ? (the bottom one is easier to read)
 		var output := ""
 		for child: SyntaxNode in self.children:
 			output += child.serialize(context)
@@ -1152,7 +1146,11 @@ class IdentifierLiteralNode:
 		return node
 
 	func evaluate(context: VisitorContext) -> Variant:
-		return context.variables.get(self.identifier, '')
+		if not context.has_variable(self.identifier):
+			context.raise_error(
+				self, "The variable `%s` is not defined." % identifier,
+			)
+		return context.get_variable(self.identifier, '')
 
 
 class BooleanLiteralNode:
@@ -1274,13 +1272,12 @@ class NotUnaryOperatorNode:
 class BinaryOperatorNode:
 	extends OperatorNode
 
-	@warning_ignore("unused_parameter")
-	func evaluate_binary(left: Variant, right: Variant) -> Variant:
-		breakpoint  # you MUST override me !
-		return null
+	@abstract
+	#@warning_ignore("unused_parameter")
+	func evaluate_binary(left: Variant, right: Variant) -> Variant
 
 	func evaluate(context: VisitorContext) -> Variant:
-		assert(self.children.size() == 2)
+		assert(self.children.size() >= 2)
 		return evaluate_binary(
 			self.children[0].evaluate(context),
 			self.children[1].evaluate(context),
@@ -1379,8 +1376,8 @@ class CombinatorNode:
 				return not (left and right)
 			Token.Types.COMBINATOR_XOR:
 				return bool(left) == bool(right)
-		breakpoint
-		return ""
+		breakpoint  # did ya start implementing a new combinator?
+		return false
 
 
 class PropertyAccessorNode:
@@ -1732,9 +1729,15 @@ class SetStatementExtension:
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
 		var identifier = (node.children[0] as IdentifierLiteralNode).identifier
 		var value = (node.children[1] as ExpressionNode).evaluate(context)
-		context.variables.set(identifier, value)
-		context.block_variables.set(identifier, value)
+		# TBD: I'm not sure about the behavior we want here ; local set for now
+		context.set_variable(identifier, value)
 		return ""
+
+
+class LoopVariable:
+	extends Resource
+	var index := 1
+	var index0 := 0
 
 
 class ForStatementExtension:
@@ -1789,6 +1792,8 @@ class ForStatementExtension:
 		) as StatementNode
 
 	func evaluate(context: VisitorContext, node: StatementNode) -> Variant:
+		var loop_variable := LoopVariable.new()
+		context.push_variables_stack({&'loop': loop_variable})
 		var output := ""
 		var loop_index0 := 0
 		var loops_left := 1_000_000  # safeguard against l∞∞ps
@@ -1799,16 +1804,19 @@ class ForStatementExtension:
 		var iterable_value = iterable_node.evaluate(context)  # as Iterable
 		if iterable_value:
 			for thing in iterable_value:
-				context.variables[element_node.identifier] = thing
+				context.set_variable(element_node.identifier, thing)
 				output += for_body.serialize(context)
 				loops_left -= 1
 				if loops_left < 0:
 					break
 				loop_index0 = loop_index0 + 1
+				loop_variable.index += 1
+				loop_variable.index0 += 1
 			if loops_left < 0:
 				push_error("A possible infinite loop (%d+ iterations) in a for statement was aborted." % [loop_index0+1])
 				breakpoint
-		if loop_index0 == 0 and else_body:
+		context.pop_variables_stack()
+		if loop_variable.index0 == 0 and else_body:
 			output += else_body.serialize(context)
 		return output
 
@@ -2444,26 +2452,68 @@ class Parser:
 
 class VisitorContext:
 	extends Resource
-	## identifier:String => value:Variant
-	var variables := {}
-	## identifier:String => value:Variant
-	var block_variables := {}
+	
+	var options := Options.new()
+	
+	# TBD: refacto idea: make a VariablesStack (reusable) class
+	## Stack of Dictionaries of identifier:String => value:Variant
+	var variables_stack: Array[Dictionary] = [{}]
+	
+	## Optional dependency, to get better error messages.
+	var error_reporter: ErrorReporter
+	
+	## Outputted errors (if any).  Read this once the visit completes.
+	var errors: Array[TemplateError] = []
+	
+	func push_variables_stack(more_variables: Dictionary = {}) -> void:
+		self.variables_stack.push_back(more_variables)
+	
+	func pop_variables_stack() -> Dictionary:
+		return self.variables_stack.pop_back()
+	
+	func has_variable(identifier: String) -> bool:
+		for i in range(variables_stack.size()-1, -1, -1):
+			if variables_stack[i].has(identifier):
+				return true
+		return false
+	
+	func set_variable(identifier: String, value: Variant) -> void:
+		self.variables_stack[-1][identifier] = value
 	
 	func get_variable(identifier: String, default: Variant = null) -> Variant:
-		return self.block_variables.get(
-			identifier,
-			self.variables.get(identifier, default),
-		)
+		for i in range(variables_stack.size()-1, -1, -1):
+			var stack: Dictionary = variables_stack[i]
+			if stack.has(identifier):
+				return stack.get(identifier, default)
+		return default
+	
+	func raise_error(
+		syntax_node: SyntaxNode,
+		message: String,
+	) -> void:
+		var token: Token
+		if syntax_node:
+			if not syntax_node.tokens.is_empty():
+				token = syntax_node.tokens[0]
+		if token and error_reporter:
+			message += "\n" + error_reporter.get_information_about_token(token)
+		if not options.silence_errors:
+			printerr(message)
+		var error := TemplateError.new()
+		error.message = message
+		self.errors.append(error)
+		if options.break_on_error:
+			assert(false, message)
 
 
-## Cleans up the syntax tree ?  (unused)
-class JanitorVisitor:
-	extends RefCounted
-	func visit(_tree: SyntaxTree) -> void:
-		pass
+# Cleans up the syntax tree ?  (unused)
+#class JanitorVisitor:
+	#extends RefCounted
+	#func visit(_tree: SyntaxTree) -> void:
+		#pass
 
 
-## Outputs the interpreted template with variables evaluated and logic applied.
+## Outputs the evaluated template with variables replaced and logic applied.
 class EvaluatorVisitor:
 	extends RefCounted
 
@@ -2472,9 +2522,36 @@ class EvaluatorVisitor:
 
 
 #class CompilerVisitor:  # cache the template as pure GdScript?
-#class StaticAnalyser:  # static analysis for Godot's code editor?
+#class StaticAnalyser:   # static analysis for Godot's code editor?
 
 #endregion
+
+
+class ErrorReporter:
+	extends RefCounted
+	
+	var source: String
+	var tokens: Array[Token]
+	
+	func get_information_about_token(token: Token) -> String:
+		var s := ""
+		if token:
+			s += "At line %d" % token.starts_in_source_at_line
+			s += " near `%s`" % get_excerpt(token)
+			s += "."
+		return s
+	
+	func get_excerpt(token: Token) -> String:
+		var s := ""
+		var i := tokens.find(token)
+		assert(i >= 0, "Something WRONG happened.  Token not found.")
+		if i >= 0:
+			var start = maxi(i - 2, 0)
+			var end = mini(i + 4, tokens.size())
+			for j in range(start, end):
+				s += "%s" % tokens[j].literal
+		return s
+
 
 ## Options of the String Engine, also used by the Tokenizer and Parser.
 var options: Options
@@ -2486,25 +2563,33 @@ func _init(some_options := Options.new()) -> void:
 ## This is the main method of the string template engine.
 func render(source: String, variables: Dictionary) -> RenderedTemplate:
 	var errors: Array[TemplateError] = []
+	var error_reporter := ErrorReporter.new()
+	error_reporter.source = source
 	
 	var tokenizer := Tokenizer.new(options)
 	var tokens := tokenizer.tokenize(source)
 	errors.append_array(tokenizer.errors)
+	error_reporter.tokens = tokens
 
 	var parser := Parser.new(options)
 	var syntax_tree := parser.parse(
 		tokens, self.statement_extensions, self.filter_extensions,
 	)
 	errors.append_array(parser.errors)
-
+	
 	var visitor_context := VisitorContext.new()
-	visitor_context.variables = variables.duplicate()
+	visitor_context.options = options
+	#visitor_context.tokens = tokens
+	visitor_context.error_reporter = error_reporter
+	#visitor_context.variables = variables.duplicate()
+	visitor_context.push_variables_stack(variables.duplicate())
 
 	#var cleaner_visitor := JanitorVisitor.new()
 	#cleaner_visitor.visit(syntax_tree)
 
 	var visitor := EvaluatorVisitor.new()
 	var output := visitor.visit(syntax_tree, visitor_context)
+	errors.append_array(visitor_context.errors)
 	
 	var rendered := RenderedTemplate.new()
 	rendered.output = output

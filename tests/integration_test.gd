@@ -840,6 +840,54 @@ func test_statement_for() -> void:
 			unodostres
 			""",
 		},
+		{
+			&'rule': "For statement provides the variable loop",
+			&'template': """
+			{%~ for i in numbers %}
+			{{ i }} ({{ loop.index }})
+			{%~ endfor %}
+			""",
+			&'variables': {
+				&'numbers': ["uno", "dos", "tres"],
+			},
+			&'configure': func(se: StringEngine):
+				se.options.clear_newline_after_statement = true,
+			&'expected': """
+			uno (1)
+			dos (2)
+			tres (3)
+			""",
+		},
+		{
+			&'rule': "Recursive for statements handle each their own variable loop",
+			&'template': """
+			{%~ for i in numbers %}
+				{{ i }} ({{ loop.index }})
+				{%~ for j in numbers %}
+				{{ i }} {{ j }} ({{ loop.index }})
+				{%~ endfor %}
+			{%~ endfor %}
+			""",
+			&'variables': {
+				&'numbers': ["uno", "dos", "tres"],
+			},
+			&'configure': func(se: StringEngine):
+				se.options.clear_newline_after_statement = true,
+			&'expected': """
+				uno (1)
+				uno uno (1)
+				uno dos (2)
+				uno tres (3)
+				dos (2)
+				dos uno (1)
+				dos dos (2)
+				dos tres (3)
+				tres (3)
+				tres uno (1)
+				tres dos (2)
+				tres tres (3)
+			""",
+		},
 	])
 #endregion
 #region {% while … %} … {% endwhile %}
